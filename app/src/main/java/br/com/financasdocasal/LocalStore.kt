@@ -35,7 +35,7 @@ class LocalStore(context: Context) : SQLiteOpenHelper(context, "financas.db", nu
                 while (cursor.moveToNext()) ids += cursor.getLong(0)
             }
             ids.forEach { id ->
-                db.execSQL("UPDATE expenses SET remote_id=? WHERE id=?", arrayOf(UUID.randomUUID().toString(), id))
+                db.execSQL("UPDATE expenses SET remote_id=? WHERE id=?", arrayOf<Any>(UUID.randomUUID().toString(), id))
             }
             db.execSQL("CREATE UNIQUE INDEX expenses_remote_id_idx ON expenses(remote_id)")
         }

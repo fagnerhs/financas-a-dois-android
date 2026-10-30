@@ -9,9 +9,7 @@ import io.github.jan.supabase.createSupabaseClient
 import io.github.jan.supabase.postgrest.Postgrest
 import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.postgrest
-import io.github.jan.supabase.postgrest.query.filter.eq
-import io.github.jan.supabase.postgrest.result.decodeList
-import io.github.jan.supabase.postgrest.result.decodeSingle
+import io.github.jan.supabase.postgrest.rpc
 import io.github.jan.supabase.realtime.Realtime
 import io.github.jan.supabase.realtime.selectAsFlow
 import io.github.jan.supabase.serializer.KotlinXSerializer
@@ -61,20 +59,20 @@ object SupabaseCloud {
     suspend fun createSpace(name: String, displayName: String): SpaceInviteDto =
         client.postgrest.rpc(
             "create_couple_space",
-            CreateSpaceArgs(p_name = name.trim(), p_display_name = displayName.trim())
+            CreateSpaceArgs(name = name.trim(), displayName = displayName.trim())
         ).decodeSingle()
 
     suspend fun joinSpace(code: String, displayName: String) {
         client.postgrest.rpc(
             "join_couple_space",
-            JoinSpaceArgs(p_invite_code = code.trim(), p_display_name = displayName.trim())
-        ).decodeSingle<String>()
+            JoinSpaceArgs(inviteCode = code.trim(), displayName = displayName.trim())
+        ).decodeAs<String>()
     }
 
     suspend fun refreshInvite(spaceId: String): SpaceInviteRefreshDto =
         client.postgrest.rpc(
             "refresh_couple_invite",
-            RefreshInviteArgs(p_space_id = spaceId)
+            RefreshInviteArgs(spaceId = spaceId)
         ).decodeSingle()
 
     suspend fun findMySpace(userId: String): CoupleSpaceDto? {
@@ -100,7 +98,7 @@ object SupabaseCloud {
     @OptIn(SupabaseExperimental::class)
     fun observeExpenses(spaceId: String): Flow<List<ExpenseDto>> =
         client.from("expenses").selectAsFlow(ExpenseDto::id) {
-            filter { eq("space_id", spaceId) }
+            eq("space_id", spaceId)
         }
 
     suspend fun uploadPending(spaceId: String, userId: String, store: LocalStore): Int {
