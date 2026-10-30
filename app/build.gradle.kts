@@ -9,7 +9,7 @@ plugins {
 
 android {
     namespace = "br.com.financasdocasal"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "br.com.financasdocasal"
