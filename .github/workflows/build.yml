@@ -16,10 +16,10 @@ jobs:
           java-version: '17'
       - uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: 8.14.3
+          gradle-version: 8.14.4
       - name: Criar Gradle Wrapper e compilar
         run: |
-          gradle wrapper --gradle-version 8.14.3
+          gradle wrapper --gradle-version 8.14.4
           chmod +x gradlew
           ./gradlew test assembleRelease --no-daemon
       - name: Assinar e verificar APK para instalação
