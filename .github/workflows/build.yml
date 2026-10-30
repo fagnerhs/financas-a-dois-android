@@ -30,13 +30,12 @@ jobs:
       - name: Assinar e verificar APK para instalação
         run: |
           STORE_PASS=$(openssl rand -hex 32)
-          KEY_PASS=$(openssl rand -hex 32)
-          keytool -genkeypair -keystore "$RUNNER_TEMP/release.jks" -storepass "$STORE_PASS" -keypass "$KEY_PASS" -alias release -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Financas a Dois, OU=Android, O=Financas a Dois, L=NA, S=NA, C=BR"
+          keytool -genkeypair -storetype JKS -keystore "$RUNNER_TEMP/release.jks" -storepass "$STORE_PASS" -keypass "$STORE_PASS" -alias release -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Financas a Dois, OU=Android, O=Financas a Dois, L=NA, S=NA, C=BR"
           $ANDROID_HOME/build-tools/36.0.0/apksigner sign \
             --ks "$RUNNER_TEMP/release.jks" \
             --ks-key-alias release \
             --ks-pass pass:"$STORE_PASS" \
-            --key-pass pass:"$KEY_PASS" \
+            --key-pass pass:"$STORE_PASS" \
             --out app/build/outputs/apk/release/app-release-signed.apk \
             app/build/outputs/apk/release/app-release-unsigned.apk
           $ANDROID_HOME/build-tools/36.0.0/apksigner verify --verbose app/build/outputs/apk/release/app-release-signed.apk
