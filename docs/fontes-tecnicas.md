@@ -31,3 +31,11 @@ A chave publishable incluída no APK é uma configuração pública de cliente; 
 [15]: https://supabase.com/docs/reference/kotlin/upsert "Supabase Kotlin — upsert"
 [16]: https://github.com/supabase/supabase-kt/releases "Releases supabase-kt"
 [17]: https://supabase.com/docs/reference/kotlin/auth-getsession "Supabase Kotlin — fluxo de status e restauração da sessão"
+
+
+## Build Android
+
+O alvo JVM do plugin Kotlin usa `kotlin.compilerOptions` com `JvmTarget.fromTarget("17")`, a migração oficial recomendada para projetos Android atuais [18]. O workflow prepara `sdkmanager` e aceita as licenças com `android-actions/setup-android`, depois instala explicitamente a plataforma API 36 e build-tools 36.0.0 exigidos pela dependência AndroidX usada no SDK [19].
+
+[18]: https://kotlinlang.org/docs/gradle-compiler-options.html "Kotlin Gradle Plugin — compilerOptions e migração de android.kotlinOptions"
+[19]: https://raw.githubusercontent.com/android-actions/setup-android/v3/README.md "android-actions/setup-android — sdkmanager e licenças"
