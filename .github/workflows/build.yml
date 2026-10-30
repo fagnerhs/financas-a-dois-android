@@ -16,17 +16,25 @@ jobs:
           java-version: '17'
       - uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: 8.9
-      - name: Gerar Gradle Wrapper e build de release
+          gradle-version: 8.14.3
+      - name: Criar Gradle Wrapper e compilar
         run: |
-          gradle wrapper --gradle-version 8.9
+          gradle wrapper --gradle-version 8.14.3
           chmod +x gradlew
           ./gradlew test assembleRelease --no-daemon
-      - name: Assinar APK para instalação
+      - name: Assinar e verificar APK para instalação
         run: |
-          keytool -genkeypair -v -keystore "$RUNNER_TEMP/release.jks" -storepass "${{ secrets.ANDROID_KEYSTORE_PASSWORD || 'temporaria' }}" -keypass "${{ secrets.ANDROID_KEYSTORE_PASSWORD || 'temporaria' }}" -alias release -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Financas a Dois, OU=Personal, O=Financas a Dois, L=NA, S=NA, C=BR"
-          $ANDROID_HOME/build-tools/35.0.0/apksigner sign --ks "$RUNNER_TEMP/release.jks" --ks-key-alias release --ks-pass pass:"${{ secrets.ANDROID_KEYSTORE_PASSWORD || 'temporaria' }}" --key-pass pass:"${{ secrets.ANDROID_KEYSTORE_PASSWORD || 'temporaria' }}" --out app/build/outputs/apk/release/app-release-signed.apk app/build/outputs/apk/release/app-release-unsigned.apk
-          $ANDROID_HOME/build-tools/35.0.0/apksigner verify app/build/outputs/apk/release/app-release-signed.apk
+          STORE_PASS=$(openssl rand -hex 32)
+          KEY_PASS=$(openssl rand -hex 32)
+          keytool -genkeypair -keystore "$RUNNER_TEMP/release.jks" -storepass "$STORE_PASS" -keypass "$KEY_PASS" -alias release -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Financas a Dois, OU=Android, O=Financas a Dois, L=NA, S=NA, C=BR"
+          $ANDROID_HOME/build-tools/35.0.0/apksigner sign \
+            --ks "$RUNNER_TEMP/release.jks" \
+            --ks-key-alias release \
+            --ks-pass pass:"$STORE_PASS" \
+            --key-pass pass:"$KEY_PASS" \
+            --out app/build/outputs/apk/release/app-release-signed.apk \
+            app/build/outputs/apk/release/app-release-unsigned.apk
+          $ANDROID_HOME/build-tools/35.0.0/apksigner verify --verbose app/build/outputs/apk/release/app-release-signed.apk
       - uses: actions/upload-artifact@v4
         with:
           name: financas-casal-apk
