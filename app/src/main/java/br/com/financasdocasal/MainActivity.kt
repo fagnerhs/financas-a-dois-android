@@ -9,10 +9,12 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import io.github.jan.supabase.auth.handleDeeplinks
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -40,7 +42,6 @@ import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Logout
-import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.DateRange
@@ -433,8 +434,8 @@ fun FinanceApp(store: LocalStore, recoveryLinkActive: Boolean = false) {
                             if (mfaChallenge == null) refreshWorkspace()
                             notice = ""
                         }
-                    } catch (_: Exception) {
-                        notice = if (createAccount) "Não foi possível criar a conta. Confira o e-mail, a senha e a conexão." else "Não foi possível entrar. Confira o e-mail e a senha."
+                    } catch (error: Exception) {
+                        notice = authErrorNotice(error, creatingAccount = createAccount)
                     } finally {
                         busy = false
                     }
@@ -1148,8 +1149,19 @@ private fun InviteCard(code: String, expired: Boolean, onShare: () -> Unit, onRe
 
 @Composable
 private fun BrandMark() {
-    Box(Modifier.size(58.dp).clip(RoundedCornerShape(18.dp)).background(Mint), contentAlignment = Alignment.Center) {
-        Icon(Icons.Filled.People, contentDescription = null, tint = Forest, modifier = Modifier.size(32.dp))
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(62.dp).clip(RoundedCornerShape(18.dp)).background(Color.White), contentAlignment = Alignment.Center) {
+            Image(
+                painter = painterResource(R.drawable.brand_mark),
+                contentDescription = "Símbolo do Finanças a Dois",
+                modifier = Modifier.size(58.dp)
+            )
+        }
+        Spacer(Modifier.width(12.dp))
+        Column {
+            Text("Finanças a Dois", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = Forest)
+            Text("Planejamento em parceria", style = MaterialTheme.typography.bodySmall, color = Muted)
+        }
     }
 }
 
