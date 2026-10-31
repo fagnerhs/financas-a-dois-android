@@ -1,4 +1,4 @@
-# Finanças a Dois — Android 1.2.1
+# Finanças a Dois — Android 1.2.3
 
 Aplicativo Android nativo para organizar despesas do casal com lançamentos manuais, contas individuais e espaço compartilhado. Não conecta a bancos e não importa movimentações bancárias. A sincronização entre aparelhos usa o projeto Supabase já configurado no aplicativo; sem internet, os dados ficam na fila local e são enviados quando a conexão voltar.
 
@@ -9,7 +9,9 @@ Aplicativo Android nativo para organizar despesas do casal com lançamentos manu
 3. Use exatamente o mesmo APK nos dois celulares. No primeiro, crie uma conta com seu e-mail e senha e crie o espaço do casal. Toque em **Compartilhar convite** e envie o código à sua esposa. No segundo, crie outra conta e escolha **Tenho um código de convite**. Não compartilhem senhas. O convite é de uso único e expira em 48 horas.
 4. Se o projeto exigir confirmação de e-mail, abra primeiro a mensagem de confirmação recebida. Depois entre no aplicativo nos dois aparelhos.
 
-Se a versão 1.2.0 mostrou erro ao criar o espaço, não repita a ação no APK antigo: o servidor pode ter aceitado a solicitação apesar do aviso. Faça backup antes de remover uma instalação anterior; a versão 1.2.1 corrige o aviso e reaproveita um espaço já existente na mesma conta.
+Se a versão 1.2.0 mostrou erro ao criar o espaço, não repita a ação no APK antigo: o servidor pode ter aceitado a solicitação apesar do aviso. Faça backup antes de remover uma instalação anterior; a versão 1.2.1 corrige o aviso e reaproveita um espaço já existente na mesma conta. A versão 1.2.3 corrige o fechamento ao abrir **Planejar** e adota a segunda logo escolhida.
+
+Se o cadastro mostrar um limite temporário de envio de e-mail, aguarde o limite do provedor liberar e tente criar a conta uma única vez; tentativas repetidas podem gerar novas recusas temporárias.
 
 ## Atualizar uma instalação anterior
 

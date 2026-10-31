@@ -33,7 +33,7 @@ import java.text.NumberFormat
 import java.time.LocalDate
 import java.util.Locale
 
-/** Manual planning UI. All mutations are delegated to callbacks; private bills are omitted from shared totals. */
+/** Manual planning UI. The parent Scaffold owns vertical scrolling; private bills are omitted from shared totals. */
 @Composable
 fun PlanningScreen(
     bills: List<RecurringBill>,
@@ -50,7 +50,7 @@ fun PlanningScreen(
     val sharedTotal = bills.filter { it.isActive && it.visibility != "private" }.sumOf { it.amount }
     val currency = remember { NumberFormat.getCurrencyInstance(Locale("pt", "BR")) }
 
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("Planejamento", style = MaterialTheme.typography.headlineMedium)
         Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
             Column(Modifier.padding(16.dp)) {
