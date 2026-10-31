@@ -1,33 +1,42 @@
-# Finanças a Dois
+# Finanças a Dois — Android 1.2.0
 
-App Android nativo em Kotlin e Jetpack Compose para acompanhar as finanças do casal. A versão 1.1 acrescenta contas individuais, espaço compartilhado por convite, sincronização entre celulares, painel mensal, limites por categoria, insights, meta de emergência e backup/importação JSON.
+Aplicativo Android nativo para organizar despesas do casal com lançamentos manuais, contas individuais e espaço compartilhado. Não conecta a bancos e não importa movimentações bancárias. A sincronização entre aparelhos usa o projeto Supabase já configurado no aplicativo; sem internet, os dados ficam na fila local e são enviados quando a conexão voltar.
 
-## Primeiro uso nos dois celulares
+## Instalar o APK no Android
 
-1. Instale o mesmo `app-release-signed.apk` nos dois aparelhos.
-2. No primeiro aparelho, crie uma conta com e-mail e senha. Se a confirmação de e-mail estiver habilitada no projeto, abra o link enviado antes de entrar.
-3. Crie o espaço compartilhado e use **Compartilhar convite** para enviar o código à sua esposa. O código é de uso único e expira após 48 horas.
-4. No segundo aparelho, crie uma conta separada, toque em **Tenho um código de convite** e informe o código.
-5. Com a conexão ativa, despesas novas aparecem por Realtime; limites, metas e participação do segundo membro são atualizados na verificação periódica (aproximadamente a cada minuto). Se a rede cair, novos lançamentos ficam no SQLite local e são enviados quando a conexão voltar; ajustes salvos offline também ficam pendentes.
+1. Baixe `app-release-signed.apk` no link fornecido e abra o arquivo pela notificação de download ou pela pasta **Downloads**.
+2. Se o Android bloquear a instalação, toque em **Configurações** na mensagem e permita temporariamente que o aplicativo usado para abrir o arquivo (por exemplo, Chrome ou Arquivos) instale apps desconhecidos. Volte e toque em **Instalar**. Os nomes podem variar entre fabricantes; depois da instalação, desative essa permissão.
+3. Use exatamente o mesmo APK nos dois celulares. No primeiro, crie uma conta com seu e-mail e senha e crie o espaço do casal. Toque em **Compartilhar convite** e envie o código à sua esposa. No segundo, crie outra conta e escolha **Tenho um código de convite**. Não compartilhem senhas. O convite é de uso único e expira em 48 horas.
+4. Se o projeto exigir confirmação de e-mail, abra primeiro a mensagem de confirmação recebida. Depois entre no aplicativo nos dois aparelhos.
 
-A chave publishable do Supabase está embutida como configuração pública de cliente. O app não contém `service_role` nem chave `secret`; acesso depende de autenticação, grants mínimos e Row Level Security. O projeto Supabase foi provisionado na cota de US$ 0/mês; limites e cotas do plano gratuito continuam sujeitos aos termos do provedor.
+## Atualizar uma instalação anterior
 
-## Recursos
+O workflow atual assina cada APK com uma chave criada somente para aquela execução. Por isso, o Android não permite instalar este APK por cima de um APK assinado por outra execução. Antes de remover a versão anterior, conecte os aparelhos à internet e confirme que os dados sincronizaram. Em **Ajustes → Backup e transferência**, exporte um backup cifrado e guarde a senha (mínimo de 12 caracteres) e o arquivo em local seguro. Em seguida, desinstale a versão anterior, instale o APK novo e entre na mesma conta. Os dados já sincronizados continuam na nuvem; o backup protege lançamentos que ainda não foram sincronizados e dados locais.
 
-O Painel mostra gastos do mês, orçamento total, movimentações e andamento dos limites. A aba Registrar aceita preenchimento manual ou frases simples como “gastei 50 no mercado”; a categoria é inferida por regras locais, não por IA, então revise antes de confiar no resultado. Insights agrupam gastos por categoria e mostram uma estimativa simples para a meta do fundo de emergência. Ajustes compartilham limites e metas no espaço do casal.
+A assinatura temporária também significa que futuras versões precisarão ser instaladas novamente, em vez de atualizadas por cima. O APK é assinado e instalável, mas não é publicado na Play Store.
 
-Os dois membros podem consultar todas as despesas, mas somente quem registrou uma despesa pode editá-la ou excluí-la. Cada pessoa autentica com a própria conta; o código de convite não substitui a senha. O app não conecta a bancos e não faz divisão/fechamento automático de contas.
+## Recursos e privacidade
 
-## Atualização a partir do APK 1.0
+A aba **Registrar** oferece lançamento manual, entrada por frase com categorização local simples e leitura de recibo por OCR no aparelho. O OCR apenas sugere valor, data e estabelecimento: confira e corrija os campos antes de salvar. A imagem e o texto reconhecido não são enviados pelo fluxo de OCR.
 
-O workflow anterior gerava uma chave temporária, portanto o Android pode recusar instalar a versão 1.1 por cima da antiga. Antes de remover o APK 1.0, abra **Ajustes → Exportar backup JSON** e guarde o conteúdo em local seguro. Se necessário, desinstale a versão antiga, instale a nova, entre/crie a conta e importe o backup em **Ajustes → Backup e transferência**.
+**Planejamento** inclui contas recorrentes e metas. Ao tocar em **Confirmar que foi paga**, o aplicativo cria um lançamento manual e avança o vencimento seguinte; não realiza pagamentos nem consulta bancos. **Insights** mostra totais, categorias, limites e previsões informadas manualmente.
 
-## Build
+Cada casal usa contas separadas. Lançamentos podem ser compartilhados, visíveis somente para o saldo ou privados. Lançamentos privados não são exibidos ao parceiro; a opção de saldo compartilhado mostra o valor e a data, sem categoria, descrição, pagador ou divisão. Cada membro só pode alterar ou excluir lançamentos que criou. O acesso à nuvem é protegido por autenticação e políticas de acesso do banco de dados.
 
-O workflow em `.github/workflows/build.yml` compila e testa o projeto, assina o APK para instalação manual e publica o artefato `financas-casal-apk` na execução do GitHub Actions. Para iniciar um build manual, abra **Actions → Build APK assinado → Run workflow**. Depois de concluído, baixe `app-release-signed.apk` em **Artifacts**. Cada execução cria uma assinatura temporária diferente; use o mesmo APK daquela execução nos dois celulares. O arquivo não é publicado na Play Store.
+O OCR funciona localmente. O aplicativo usa armazenamento local protegido por chave do Android e pode criar backups cifrados com senha. A senha do backup não fica salva no aplicativo; mantenha-a separada do arquivo. A autenticação por código TOTP é opcional. Ao habilitá-la, será necessário usar um autenticador para cumprir a verificação adicional da sessão.
 
-As principais fontes técnicas e decisões de produto estão registradas em [`docs/fontes-tecnicas.md`](docs/fontes-tecnicas.md).
+## Recuperação de senha
 
-## Testes
+O callback Android configurado no app é `financas-a-dois://auth`. Para que os links de recuperação de senha abram diretamente o app, esse URI precisa constar na lista **Redirect URLs** da configuração de autenticação do projeto Supabase. A instalação e o uso diário não exigem inserir chaves ou endereços no app.
 
-`./gradlew test` roda os testes unitários do parser e da conversão de valores. O workflow também compila o release e verifica a assinatura. Testes reais de login, convite, Realtime e instalação precisam de dois aparelhos ou emuladores Android com acesso à internet.
+## Projeto Supabase e limites
+
+O app já vem apontado para o projeto `financas-casal`; não é necessário criar um projeto ou preencher configuração técnica no celular. A chave incluída no APK é a chave publishable, destinada a clientes móveis. Não há chave `service_role` no aplicativo. O uso e as cotas do Supabase dependem do plano e dos limites vigentes do provedor.
+
+## Build e testes
+
+O workflow `.github/workflows/build.yml` executa os testes unitários, compila o release, assina e verifica o APK e publica o artefato `financas-casal-apk` por 30 dias. O build usa Android SDK 36, Java 17 e Gradle 8.14.4. Para iniciar manualmente, abra **Actions → Build APK assinado → Run workflow**; ao terminar, baixe `app-release-signed.apk` em **Artifacts**.
+
+`./gradlew test` cobre parser, valores, previsão, OCR e utilitários de backup. A compilação e a assinatura são verificadas pelo workflow. Login, convite, sincronização Realtime, OCR real e instalação precisam ser verificados em aparelhos ou emuladores Android; os testes unitários, sozinhos, não comprovam esses fluxos ponta a ponta.
+
+As migrations SQL estão em `supabase/migrations/`. As fontes técnicas e decisões de segurança estão em `docs/roteiro-inovacoes-seguranca.md` e `docs/fontes-tecnicas.md`.
