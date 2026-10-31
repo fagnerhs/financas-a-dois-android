@@ -7,6 +7,7 @@ import kotlinx.serialization.encodeToString
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
@@ -28,11 +29,8 @@ class SecureDataTest {
 
     @Test fun wrongPassphraseIsRejectedWithoutDiagnosticDetail() {
         val encrypted = EncryptedBackup.encrypt(plaintext, password)
-        val error = try {
+        val error = assertThrows(IllegalArgumentException::class.java) {
             EncryptedBackup.decrypt(encrypted, "another sufficiently long phrase")
-            fail("Expected wrong passphrase to fail")
-        } catch (e: IllegalArgumentException) {
-            e
         }
         assertEquals("Unable to decrypt backup", error.message)
     }
