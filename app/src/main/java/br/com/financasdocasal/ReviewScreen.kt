@@ -26,7 +26,7 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 /**
- * Lista de conferência e histórico de despesas. O chamador atualiza as despesas apenas
+ * Lista de conferência e histórico de movimentações. O chamador atualiza as despesas apenas
  * depois de sucesso remoto. Deve ser colocada em um contêiner de altura delimitada.
  * Snapshots nunca são lidos nem apresentados; erros ficam a cargo do chamador.
  */
@@ -38,7 +38,7 @@ fun ReviewScreen(
     currentUserId: String,
     onReviewed: (String) -> Unit
 ) {
-    val pending = expenses.filter { it.visibility == "shared" && it.reviewStatus == "pending" }
+    val pending = expenses.filter { it.visibility == "shared" && it.reviewStatus == "pending" && it.kind in setOf(EntryKind.EXPENSE, EntryKind.INCOME) }
     val visibleEvents = events
         .filter { it.visibility == "shared" || it.actorId == currentUserId }
         .sortedByDescending { it.occurredAt }
@@ -49,9 +49,9 @@ fun ReviewScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item {
-            Text("Conferir despesas", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+            Text("Conferir movimentações", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(4.dp))
-            Text("Despesas compartilhadas aguardando sua conferência", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("Movimentações compartilhadas aguardando sua conferência", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         if (pending.isEmpty()) {
             item {
@@ -59,7 +59,7 @@ fun ReviewScreen(
                     Column(Modifier.padding(20.dp)) {
                         Text("Tudo em dia", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                         Spacer(Modifier.height(4.dp))
-                        Text("Não há despesas compartilhadas pendentes de conferência.", style = MaterialTheme.typography.bodyMedium)
+                        Text("Não há movimentações compartilhadas pendentes de conferência.", style = MaterialTheme.typography.bodyMedium)
                     }
                 }
             }
@@ -72,9 +72,9 @@ fun ReviewScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
-                            Text(expense.description.ifBlank { "Despesa" }, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Medium)
+                            Text(expense.description.ifBlank { if (expense.kind == EntryKind.INCOME) "Renda" else "Despesa" }, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Medium)
                             Spacer(Modifier.height(4.dp))
-                            Text("${expense.category} · ${expense.date}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("${if (expense.kind == EntryKind.INCOME) "Entrada · Renda" else "Despesa"} · ${expense.category} · ${expense.date}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         Button(onClick = { onReviewed(expense.remoteId) }) { Text("Conferi") }
                     }
@@ -102,10 +102,10 @@ fun ReviewScreen(
 }
 
 private fun actionLabel(eventType: String): String = when (eventType.lowercase(Locale.ROOT)) {
-    "created", "expense_created", "inserted", "insert" -> "Adicionou uma despesa"
-    "updated", "expense_updated", "update" -> "Atualizou uma despesa"
-    "deleted", "expense_deleted", "delete" -> "Removeu uma despesa"
-    "reviewed", "expense_reviewed" -> "Conferiu uma despesa"
+    "created", "expense_created", "inserted", "insert" -> "Adicionou uma movimentação"
+    "updated", "expense_updated", "update" -> "Atualizou uma movimentação"
+    "deleted", "expense_deleted", "delete" -> "Removeu uma movimentação"
+    "reviewed", "expense_reviewed" -> "Conferiu uma movimentação"
     else -> "Realizou uma atividade"
 }
 

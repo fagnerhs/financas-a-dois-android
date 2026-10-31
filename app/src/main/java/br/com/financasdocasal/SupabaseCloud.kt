@@ -87,11 +87,11 @@ object SupabaseCloud {
     @SerialName("expense_date") val expenseDate:String,@SerialName("created_by") val createdBy:String,
     val visibility:String="shared",@SerialName("creator_share_amount") val creatorShareAmount:Double=amount,
     @SerialName("review_status") val reviewStatus:String="pending",@SerialName("reviewed_by") val reviewedBy:String?=null,
-    @SerialName("reviewed_at") val reviewedAt:String?=null
+    @SerialName("reviewed_at") val reviewedAt:String?=null,@SerialName("kind") val kind:String=EntryKind.EXPENSE
 ) {
-    fun toLocal()=Expense(amount,category,payer,description,expenseDate,id,createdBy,synced=true,visibility=visibility,creatorShareAmount=creatorShareAmount,reviewStatus=reviewStatus,reviewedBy=reviewedBy,reviewedAt=reviewedAt)
+    fun toLocal()=Expense(amount,category,payer,description,expenseDate,id,createdBy,synced=true,visibility=visibility,creatorShareAmount=creatorShareAmount,reviewStatus=reviewStatus,reviewedBy=reviewedBy,reviewedAt=reviewedAt,kind=kind)
 }
-private fun Expense.toDto(spaceId:String,userId:String)=ExpenseDto(remoteId,spaceId,amount,category,payer,description,date,userId,visibility,creatorShareAmount,reviewStatus,reviewedBy,reviewedAt)
+private fun Expense.toDto(spaceId:String,userId:String)=ExpenseDto(remoteId,spaceId,amount,category,payer,description,date,userId,visibility,creatorShareAmount,reviewStatus,reviewedBy,reviewedAt,kind)
 @Serializable data class ExpenseBalanceDto(@SerialName("expense_id") val expenseId:String,@SerialName("space_id") val spaceId:String,val amount:Double,@SerialName("expense_date") val expenseDate:String,@SerialName("created_by") val createdBy:String)
 @Serializable data class RecurringBillDto(val id:String,@SerialName("space_id") val spaceId:String,val amount:Double,val category:String,val payer:String,val description:String,@SerialName("next_date") val nextDate:String,val frequency:String,@SerialName("is_active") val isActive:Boolean,val visibility:String,@SerialName("created_by") val createdBy:String) {
     fun toLocal()=RecurringBill(id,spaceId,amount,category,payer,description,nextDate,frequency,isActive,visibility,createdBy,true)

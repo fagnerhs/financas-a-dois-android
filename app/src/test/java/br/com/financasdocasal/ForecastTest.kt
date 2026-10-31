@@ -11,6 +11,14 @@ class ForecastTest {
     private fun expense(amount: Double, date: String, visibility: String = "shared") =
         Expense(amount, "x", "", "", date, visibility = visibility)
 
+    @Test fun incomeIsNotSubtractedFromManualBalance() {
+        val income = Expense(800.0, "Salário", "", "", "2026-10-15", kind = EntryKind.INCOME)
+        val expense = expense(125.0, "2026-10-16")
+        val result = calculateCashForecast(1000.0, snapshot, today, payday, listOf(income, expense), emptyList())
+        assertEquals(125.0, result.includedExpenses, 0.001)
+        assertEquals(875.0, result.remaining, 0.001)
+    }
+
     @Test fun includesOnlyExpensesAfterSnapshotAndNotPrivate() {
         val result = calculateCashForecast(1000.0, snapshot, today, payday, listOf(
             expense(100.0, "2026-10-01"), expense(200.0, "2026-10-02"),

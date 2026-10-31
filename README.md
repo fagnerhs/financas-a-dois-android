@@ -1,15 +1,15 @@
-# Finanças a Dois — Android 1.2.3
+# Finanças a Dois — Android 1.3.0
 
-Aplicativo Android nativo para organizar despesas do casal com lançamentos manuais, contas individuais e espaço compartilhado. Não conecta a bancos e não importa movimentações bancárias. A sincronização entre aparelhos usa o projeto Supabase já configurado no aplicativo; sem internet, os dados ficam na fila local e são enviados quando a conexão voltar.
+Aplicativo Android nativo para organizar entradas de renda e despesas do casal com lançamentos manuais, contas individuais e espaço compartilhado. Não conecta a bancos e não importa movimentações bancárias. A sincronização entre aparelhos usa o projeto Supabase já configurado no aplicativo; sem internet, os dados ficam na fila local e são enviados quando a conexão voltar.
 
 ## Instalar o APK no Android
 
 1. Baixe `app-release-signed.apk` no link fornecido e abra o arquivo pela notificação de download ou pela pasta **Downloads**.
 2. Se o Android bloquear a instalação, toque em **Configurações** na mensagem e permita temporariamente que o aplicativo usado para abrir o arquivo (por exemplo, Chrome ou Arquivos) instale apps desconhecidos. Volte e toque em **Instalar**. Os nomes podem variar entre fabricantes; depois da instalação, desative essa permissão.
 3. Use exatamente o mesmo APK nos dois celulares. No primeiro, crie uma conta com seu e-mail e senha e crie o espaço do casal. Toque em **Compartilhar convite** e envie o código à sua esposa. No segundo, crie outra conta e escolha **Tenho um código de convite**. Não compartilhem senhas. O convite é de uso único e expira em 48 horas.
-4. Se o projeto exigir confirmação de e-mail, abra primeiro a mensagem de confirmação recebida. Depois entre no aplicativo nos dois aparelhos.
+4. Se o projeto exigir confirmação de e-mail, abra primeiro a mensagem de confirmação recebida. Depois entre no aplicativo nos dois aparelhos. Opcionalmente, ative o desbloqueio biométrico em **Ajustes** em cada celular.
 
-Se a versão 1.2.0 mostrou erro ao criar o espaço, não repita a ação no APK antigo: o servidor pode ter aceitado a solicitação apesar do aviso. Faça backup antes de remover uma instalação anterior; a versão 1.2.1 corrige o aviso e reaproveita um espaço já existente na mesma conta. A versão 1.2.3 corrige o fechamento ao abrir **Planejar** e adota a segunda logo escolhida.
+Se a versão 1.2.0 mostrou erro ao criar o espaço, não repita a ação no APK antigo: o servidor pode ter aceitado a solicitação apesar do aviso. As versões 1.2.1 e 1.2.3 corrigiram problemas de criação do espaço e da tela **Planejar**; a versão 1.3.0 acrescenta o cadastro de rendas e o bloqueio biométrico.
 
 Se o cadastro mostrar um limite temporário de envio de e-mail, aguarde o limite do provedor liberar e tente criar a conta uma única vez; tentativas repetidas podem gerar novas recusas temporárias.
 
@@ -21,13 +21,13 @@ A assinatura temporária também significa que futuras versões precisarão ser 
 
 ## Recursos e privacidade
 
-A aba **Registrar** oferece lançamento manual, entrada por frase com categorização local simples e leitura de recibo por OCR no aparelho. O OCR apenas sugere valor, data e estabelecimento: confira e corrija os campos antes de salvar. A imagem e o texto reconhecido não são enviados pelo fluxo de OCR.
+A aba **Registrar** alterna entre **Renda** e **Despesa**. Para renda, informe uma fonte personalizada (por exemplo, salário ou trabalho extra); para despesa, escolha uma categoria, divida o valor se quiser ou use frase/OCR para agilizar. O painel e os Insights mostram entradas, despesas e saldo compartilhados separadamente. O OCR apenas sugere valor, data e estabelecimento: confira e corrija os campos antes de salvar. A imagem e o texto reconhecido não são enviados pelo fluxo de OCR.
 
 **Planejamento** inclui contas recorrentes e metas. Ao tocar em **Confirmar que foi paga**, o aplicativo cria um lançamento manual e avança o vencimento seguinte; não realiza pagamentos nem consulta bancos. **Insights** mostra totais, categorias, limites e previsões informadas manualmente.
 
 Cada casal usa contas separadas. Lançamentos podem ser compartilhados, visíveis somente para o saldo ou privados. Lançamentos privados não são exibidos ao parceiro; a opção de saldo compartilhado mostra o valor e a data, sem categoria, descrição, pagador ou divisão. Cada membro só pode alterar ou excluir lançamentos que criou. O acesso à nuvem é protegido por autenticação e políticas de acesso do banco de dados.
 
-O OCR funciona localmente. O aplicativo usa armazenamento local protegido por chave do Android e pode criar backups cifrados com senha. A senha do backup não fica salva no aplicativo; mantenha-a separada do arquivo. A autenticação por código TOTP é opcional. Ao habilitá-la, será necessário usar um autenticador para cumprir a verificação adicional da sessão.
+O OCR funciona localmente. O aplicativo usa armazenamento local protegido por chave do Android e pode criar backups cifrados com senha. A senha do backup não fica salva no aplicativo; mantenha-a separada do arquivo. O **desbloqueio biométrico** é opcional e pode ser ativado em Ajustes; ele bloqueia o app depois de 30 segundos fora de primeiro plano e aceita a biometria ou o PIN, padrão ou senha de tela do próprio aparelho. É uma proteção local, separada do login da conta. A autenticação por código TOTP também é opcional; ao habilitá-la, será necessário usar um autenticador para cumprir a verificação adicional da sessão.
 
 ## Recuperação de senha
 
@@ -41,6 +41,6 @@ O app já vem apontado para o projeto `financas-casal`; não é necessário cria
 
 O workflow `.github/workflows/build.yml` executa os testes unitários, compila o release, assina e verifica o APK e publica o artefato `financas-casal-apk` por 30 dias. O build usa Android SDK 36, Java 17 e Gradle 8.14.4. Para iniciar manualmente, abra **Actions → Build APK assinado → Run workflow**; ao terminar, baixe `app-release-signed.apk` em **Artifacts**.
 
-`./gradlew test` cobre parser, valores, previsão, OCR e utilitários de backup. A compilação e a assinatura são verificadas pelo workflow. Login, convite, sincronização Realtime, OCR real e instalação precisam ser verificados em aparelhos ou emuladores Android; os testes unitários, sozinhos, não comprovam esses fluxos ponta a ponta.
+`./gradlew test` cobre parser, valores, previsão, OCR, backup e regras de previsão sem subtrair renda já registrada. A compilação e a assinatura são verificadas pelo workflow. Login, convite, sincronização Realtime, autenticação biométrica em aparelho real, OCR real e instalação precisam ser verificados em aparelhos ou emuladores Android; os testes unitários, sozinhos, não comprovam esses fluxos ponta a ponta.
 
 As migrations SQL estão em `supabase/migrations/`. As fontes técnicas e decisões de segurança estão em `docs/roteiro-inovacoes-seguranca.md` e `docs/fontes-tecnicas.md`.

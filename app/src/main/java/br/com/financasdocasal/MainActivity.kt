@@ -1,9 +1,11 @@
 package br.com.financasdocasal
 
 import android.content.Context
+import android.content.ContextWrapper
 import android.content.Intent
 import android.os.Bundle
 import android.os.Build
+import android.os.SystemClock
 import android.content.pm.PackageManager
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -11,8 +13,11 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import io.github.jan.supabase.auth.handleDeeplinks
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.biometric.BiometricManager
+import androidx.biometric.BiometricPrompt
+import androidx.core.content.ContextCompat
+import androidx.fragment.app.FragmentActivity
 import androidx.compose.foundation.background
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
@@ -68,6 +73,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -111,8 +117,20 @@ private val Muted = Color(0xFF62736C)
 private val Amber = Color(0xFFFFF0C2)
 private val Rose = Color(0xFFFFE3DF)
 
-class MainActivity : ComponentActivity() {
+private tailrec fun Context.findMainActivity(): MainActivity? = when (this) {
+    is MainActivity -> this
+    is ContextWrapper -> baseContext.findMainActivity()
+    else -> null
+}
+
+class MainActivity : FragmentActivity() {
     private val recoveryLinkReceived = mutableStateOf(false)
+    val biometricEnabled = mutableStateOf(false)
+    val biometricNotice = mutableStateOf("")
+    private val appUnlocked = mutableStateOf(true)
+    private var biometricPromptActive = false
+    private var backgroundAtElapsed = 0L
+    private var autoPromptedForLock = false
 
     private fun isRecoveryIntent(data: Uri?): Boolean {
         if (data == null) return false
@@ -135,6 +153,83 @@ class MainActivity : ComponentActivity() {
         getSharedPreferences("prefs", Context.MODE_PRIVATE).edit().remove("password_reset_requested_at").apply()
     }
 
+    private fun showDeviceAuthentication(title: String, onSuccess: () -> Unit, onError: (String) -> Unit) {
+        if (biometricPromptActive) return
+        biometricPromptActive = true
+        try {
+            val promptInfo = BiometricPrompt.PromptInfo.Builder()
+                .setTitle(title)
+                .setSubtitle("Use biometria ou o PIN, padrão ou senha do aparelho.")
+                .setDeviceCredentialAllowed(true)
+                .build()
+            val prompt = BiometricPrompt(this, ContextCompat.getMainExecutor(this), object : BiometricPrompt.AuthenticationCallback() {
+                override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                    biometricPromptActive = false
+                    onSuccess()
+                }
+
+                override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                    biometricPromptActive = false
+                    val message = if (errorCode == BiometricPrompt.ERROR_USER_CANCELED || errorCode == BiometricPrompt.ERROR_CANCELED) {
+                        "Autenticação cancelada. Toque em tentar novamente para desbloquear."
+                    } else {
+                        "Não foi possível autenticar. Tente novamente ou use o bloqueio de tela do aparelho."
+                    }
+                    onError(message)
+                }
+
+                override fun onAuthenticationFailed() {
+                    biometricNotice.value = "Não foi possível reconhecer. Tente novamente ou use o bloqueio de tela do aparelho."
+                }
+            })
+            prompt.authenticate(promptInfo)
+        } catch (_: Exception) {
+            biometricPromptActive = false
+            onError("Não foi possível abrir a autenticação do aparelho. Confira se há bloqueio de tela configurado.")
+        }
+    }
+
+    fun enableBiometricForApp(onResult: (Boolean) -> Unit) {
+        val status = BiometricManager.from(this).canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_WEAK)
+        if (status != BiometricManager.BIOMETRIC_SUCCESS) {
+            biometricNotice.value = when (status) {
+                BiometricManager.BIOMETRIC_ERROR_NO_HARDWARE -> "Este aparelho não tem biometria compatível."
+                BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED -> "Cadastre uma impressão digital ou reconhecimento facial nas configurações do Android antes de ativar."
+                BiometricManager.BIOMETRIC_ERROR_HW_UNAVAILABLE -> "A biometria está temporariamente indisponível. Tente mais tarde."
+                else -> "Não foi possível verificar a biometria neste aparelho."
+            }
+            onResult(false)
+            return
+        }
+        showDeviceAuthentication("Ativar desbloqueio biométrico", onSuccess = {
+            getSharedPreferences("prefs", Context.MODE_PRIVATE).edit().putBoolean("biometric_enabled", true).apply()
+            biometricEnabled.value = true
+            appUnlocked.value = true
+            backgroundAtElapsed = 0L
+            autoPromptedForLock = false
+            biometricNotice.value = ""
+            onResult(true)
+        }, onError = { message -> biometricNotice.value = message; onResult(false) })
+    }
+
+    fun disableBiometricForApp() {
+        getSharedPreferences("prefs", Context.MODE_PRIVATE).edit().putBoolean("biometric_enabled", false).apply()
+        biometricEnabled.value = false
+        appUnlocked.value = true
+        backgroundAtElapsed = 0L
+        autoPromptedForLock = false
+        biometricNotice.value = ""
+    }
+
+    fun requestAppUnlock() {
+        showDeviceAuthentication("Desbloquear Finanças a Dois", onSuccess = {
+            appUnlocked.value = true
+            backgroundAtElapsed = 0L
+            autoPromptedForLock = false
+            biometricNotice.value = ""
+        }, onError = { message -> biometricNotice.value = message })
+    }
+
     @OptIn(ExperimentalMaterial3Api::class)
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
@@ -144,6 +239,8 @@ class MainActivity : ComponentActivity() {
     }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        biometricEnabled.value = getSharedPreferences("prefs", Context.MODE_PRIVATE).getBoolean("biometric_enabled", false)
+        appUnlocked.value = !biometricEnabled.value
         recoveryLinkReceived.value = isRecoveryIntent(intent.data)
         runCatching { SupabaseCloud.client.handleDeeplinks(intent) }
         setContent {
@@ -158,7 +255,58 @@ class MainActivity : ComponentActivity() {
                     onSurface = Ink
                 )
             ) {
-                FinanceApp(store, recoveryLinkReceived.value)
+                if (biometricEnabled.value && !appUnlocked.value) {
+                    BiometricUnlockScreen(biometricNotice.value, ::requestAppUnlock)
+                } else {
+                    FinanceApp(store, recoveryLinkReceived.value)
+                }
+            }
+        }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        if (biometricEnabled.value && !biometricPromptActive && backgroundAtElapsed > 0L && SystemClock.elapsedRealtime() - backgroundAtElapsed >= 30_000L) {
+            appUnlocked.value = false
+            autoPromptedForLock = false
+            biometricNotice.value = ""
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (biometricEnabled.value && !appUnlocked.value && !autoPromptedForLock) {
+            autoPromptedForLock = true
+            requestAppUnlock()
+        }
+    }
+
+    override fun onStop() {
+        if (biometricEnabled.value && !biometricPromptActive) backgroundAtElapsed = SystemClock.elapsedRealtime()
+        super.onStop()
+    }
+}
+
+@Composable
+private fun BiometricUnlockScreen(notice: String, onUnlock: () -> Unit) {
+    Surface(Modifier.fillMaxSize(), color = Canvas) {
+        Column(
+            Modifier.fillMaxSize().padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            BrandMark()
+            Spacer(Modifier.height(28.dp))
+            Text("App protegido", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = Ink)
+            Spacer(Modifier.height(8.dp))
+            Text("Confirme sua identidade para abrir suas finanças. Você pode usar biometria ou o PIN, padrão ou senha do aparelho.", color = Muted)
+            if (notice.isNotBlank()) {
+                Spacer(Modifier.height(14.dp))
+                NoticeCard(notice)
+            }
+            Spacer(Modifier.height(18.dp))
+            Button(onClick = onUnlock, modifier = Modifier.fillMaxWidth().height(52.dp), shape = RoundedCornerShape(16.dp)) {
+                Text("Desbloquear", fontWeight = FontWeight.SemiBold)
             }
         }
     }
@@ -169,6 +317,9 @@ class MainActivity : ComponentActivity() {
 fun FinanceApp(store: LocalStore, recoveryLinkActive: Boolean = false) {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("prefs", Context.MODE_PRIVATE) }
+    val activity = context.findMainActivity()
+    val biometricEnabled = activity?.biometricEnabled?.value ?: false
+    val biometricNotice = activity?.biometricNotice?.value.orEmpty()
     val scope = rememberCoroutineScope()
 
     var userId by remember { mutableStateOf<String?>(null) }
@@ -498,7 +649,9 @@ fun FinanceApp(store: LocalStore, recoveryLinkActive: Boolean = false) {
     val currentSpace = space!!
     val currentMonth = YearMonth.now().toString()
     val monthlyRows = rows.filter { it.date.startsWith(currentMonth) && it.visibility != "private" }
-    val monthSpend = monthlyRows.filter { it.visibility == "shared" || it.visibility == "balances_only" }.sumOf { it.amount }
+    val monthlySummary = summarizeMonthlyEntries(rows, currentMonth)
+    val monthSpend = monthlySummary.expenses
+    val monthIncome = monthlySummary.income
     val totalBudget = budgets.values.sum()
     val budgetRatio = if (totalBudget > 0) (monthSpend / totalBudget).toFloat().coerceIn(0f, 1f) else 0f
     val memberNames = currentSpace.members.map { it.displayName }
@@ -576,9 +729,11 @@ fun FinanceApp(store: LocalStore, recoveryLinkActive: Boolean = false) {
 
             when (tab) {
                 0 -> { DashboardScreen(
-                    expenses = monthlyRows.filter { it.visibility != "private" },
+                    expenses = monthlyRows.filter { it.kind == EntryKind.EXPENSE && it.visibility != "private" },
                     allExpenses = rows.filter { it.visibility != "private" || it.createdBy == userId },
                     total = monthSpend,
+                    incomeTotal = monthIncome,
+                    monthlyCount = monthlySummary.movementCount,
                     budget = totalBudget,
                     progress = budgetRatio,
                     budgets = budgets,
@@ -632,7 +787,7 @@ fun FinanceApp(store: LocalStore, recoveryLinkActive: Boolean = false) {
                                     visible.forEach { store.upsertRemote(it.toLocal()) }
                                 }
                                 rows = withContext(Dispatchers.IO) { visibleExpenses(store.all()) }
-                                notice = "Despesa salva e compartilhada."
+                                notice = if (authored.kind == EntryKind.INCOME) "Renda salva e compartilhada." else "Despesa salva e compartilhada."
                                 syncNotice = "Sincronizado com seu par"
                             } catch (_: Exception) {
                                 syncNotice = "Offline · será enviado automaticamente"
@@ -686,6 +841,16 @@ fun FinanceApp(store: LocalStore, recoveryLinkActive: Boolean = false) {
                     onSaved = { emergencySaved = it },
                     monthly = monthlyContribution,
                     onMonthly = { monthlyContribution = it },
+                    biometricEnabled = biometricEnabled,
+                    biometricNotice = biometricNotice,
+                    onBiometricChange = { enabled ->
+                        if (enabled) {
+                            activity?.enableBiometricForApp { activated -> if (activated) notice = "Desbloqueio biométrico ativado neste aparelho." }
+                        } else {
+                            activity?.disableBiometricForApp()
+                            notice = "Desbloqueio biométrico desativado."
+                        }
+                    },
                     onExport = {
                         val owner = userId ?: throw IllegalStateException("Conta não autenticada")
                         withContext(Dispatchers.IO) { store.exportJson(owner) }
@@ -865,6 +1030,8 @@ private fun DashboardScreen(
     expenses: List<Expense>,
     allExpenses: List<Expense>,
     total: Double,
+    incomeTotal: Double,
+    monthlyCount: Int,
     budget: Double,
     progress: Float,
     budgets: Map<String, Double>,
@@ -876,13 +1043,18 @@ private fun DashboardScreen(
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Card(shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = ForestDark), modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(20.dp)) {
-                Text("VISÃO DO MÊS", color = Color.White.copy(alpha = .75f), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+                Text("SALDO COMPARTILHADO DO MÊS", color = Color.White.copy(alpha = .75f), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(8.dp))
-                Text(currency(total), color = Color.White, style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.height(16.dp))
+                Text(currency(incomeTotal - total), color = Color.White, style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(14.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Column { Text("Entradas", color = Color.White.copy(alpha = .75f), style = MaterialTheme.typography.labelSmall); Text(currency(incomeTotal), color = Color.White, fontWeight = FontWeight.SemiBold) }
+                    Column(horizontalAlignment = Alignment.End) { Text("Despesas", color = Color.White.copy(alpha = .75f), style = MaterialTheme.typography.labelSmall); Text(currency(total), color = Color.White, fontWeight = FontWeight.SemiBold) }
+                }
+                Spacer(Modifier.height(14.dp))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Column { Text("Orçamento definido", color = Color.White.copy(alpha = .75f), style = MaterialTheme.typography.labelSmall); Text(if (budget > 0) currency(budget) else "Ainda não definido", color = Color.White, fontWeight = FontWeight.SemiBold) }
-                    Column(horizontalAlignment = Alignment.End) { Text("Lançamentos", color = Color.White.copy(alpha = .75f), style = MaterialTheme.typography.labelSmall); Text(expenses.size.toString(), color = Color.White, fontWeight = FontWeight.SemiBold) }
+                    Column(horizontalAlignment = Alignment.End) { Text("Movimentações", color = Color.White.copy(alpha = .75f), style = MaterialTheme.typography.labelSmall); Text(monthlyCount.toString(), color = Color.White, fontWeight = FontWeight.SemiBold) }
                 }
                 if (budget > 0) {
                     Spacer(Modifier.height(14.dp))
@@ -895,7 +1067,7 @@ private fun DashboardScreen(
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             MetricCard("Categorias", budgets.size.toString(), "com limite", Modifier.weight(1f))
             val largest = expenses.groupBy { it.category }.maxByOrNull { it.value.sumOf(Expense::amount) }?.key ?: "—"
-            MetricCard("Maior gasto", largest, "neste mês", Modifier.weight(1f))
+            MetricCard("Maior despesa", largest, "neste mês", Modifier.weight(1f))
         }
         if (budgets.isNotEmpty()) {
             SectionTitle("Limites por categoria", "alerta preventivo a partir de 80%")
@@ -915,7 +1087,7 @@ private fun DashboardScreen(
             }
         }
         SectionTitle("Movimentações recentes", "${allExpenses.size} no histórico")
-        if (allExpenses.isEmpty()) EmptyCard("Comecem pelo primeiro lançamento", "Registre uma despesa pela aba Registrar; ela aparecerá automaticamente no outro celular.")
+        if (allExpenses.isEmpty()) EmptyCard("Comecem pelo primeiro lançamento", "Registrem uma renda ou despesa na aba Registrar; ela aparecerá no outro celular.")
         allExpenses.take(12).forEach { expense ->
             ExpenseCard(expense, canDelete = expense.createdBy == currentUserId && expense.visibility != "balances_only", onDelete = { onDelete(expense) })
         }
@@ -927,6 +1099,7 @@ private fun DashboardScreen(
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun RegisterScreen(names: List<String>, currentUserId: String?, notice: String, onAdd: (Expense) -> Unit) {
+    var entryKind by remember { mutableStateOf(EntryKind.EXPENSE) }
     var manual by remember { mutableStateOf(false) }
     var phrase by remember { mutableStateOf("") }
     var amountText by remember { mutableStateOf("") }
@@ -934,10 +1107,12 @@ private fun RegisterScreen(names: List<String>, currentUserId: String?, notice: 
     var description by remember { mutableStateOf("") }
     var payer by remember(names) { mutableStateOf(names.firstOrNull() ?: "") }
     var category by remember { mutableStateOf(Categories.all.first()) }
+    var incomeSource by remember { mutableStateOf("") }
     var categoryMenu by remember { mutableStateOf(false) }
     var visibility by remember { mutableStateOf("shared") }
     var shareText by remember { mutableStateOf("") }
     var receiptNotice by remember { mutableStateOf("") }
+    val isIncome = entryKind == EntryKind.INCOME
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
@@ -954,16 +1129,27 @@ private fun RegisterScreen(names: List<String>, currentUserId: String?, notice: 
             } catch (_: Exception) { receiptNotice = "Não foi possível ler a imagem. Nenhuma foto foi salva ou enviada." }
         }
     }
+    val amount = parsePtBrNumber(amountText) ?: 0.0
+    val dateIsValid = runCatching { LocalDate.parse(expenseDate) }.isSuccess
+    val entryLabelIsValid = if (isIncome) incomeSource.trim().isNotEmpty() else category in Categories.all
+    val creatorShare = parsePtBrNumber(shareText) ?: amount
+    val shareIsValid = isIncome || visibility == "private" || creatorShare in 0.0..amount
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("Registrar despesa", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = Ink)
-        Text("Rápido no dia a dia, organizado para o planejamento de vocês.", color = Muted)
-        OutlinedButton(onClick = { photoPicker.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp)) { Text("Ler recibo (OCR no aparelho)") }
-        if (receiptNotice.isNotBlank()) NoticeCard(receiptNotice)
+        Text("Novo lançamento", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = Ink)
+        Text("Registrem entradas e despesas para acompanhar o saldo do mês.", color = Muted)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilterChip(selected = !manual, onClick = { manual = false }, label = { Text("Por frase") })
-            FilterChip(selected = manual, onClick = { manual = true }, label = { Text("Preencher manualmente") })
+            FilterChip(selected = !isIncome, onClick = { entryKind = EntryKind.EXPENSE }, label = { Text("Despesa") })
+            FilterChip(selected = isIncome, onClick = { entryKind = EntryKind.INCOME; manual = true; if (visibility == "balances_only") visibility = "shared" }, label = { Text("Renda") })
         }
-        if (!manual) {
+        if (!isIncome) {
+            OutlinedButton(onClick = { photoPicker.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp)) { Text("Ler recibo (OCR no aparelho)") }
+            if (receiptNotice.isNotBlank()) NoticeCard(receiptNotice)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(selected = !manual, onClick = { manual = false }, label = { Text("Por frase") })
+                FilterChip(selected = manual, onClick = { manual = true }, label = { Text("Preencher manualmente") })
+            }
+        }
+        if (!isIncome && !manual) {
             Card(colors = CardDefaults.cardColors(containerColor = Mint), shape = RoundedCornerShape(18.dp)) {
                 Column(Modifier.padding(14.dp)) {
                     Text("Exemplos", color = ForestDark, fontWeight = FontWeight.SemiBold)
@@ -986,27 +1172,41 @@ private fun RegisterScreen(names: List<String>, currentUserId: String?, notice: 
             ) { Icon(Icons.Filled.Add, contentDescription = null); Spacer(Modifier.width(8.dp)); Text("Registrar despesa") }
         } else {
             OutlinedTextField(amountText, { amountText = it }, Modifier.fillMaxWidth(), label = { Text("Valor (R$)") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
-            OutlinedTextField(expenseDate, { expenseDate = it }, Modifier.fillMaxWidth(), label = { Text("Data (AAAA-MM-DD)") }, singleLine = true, supportingText = { Text("Confira a data sugerida pelo recibo antes de salvar.") })
-            OutlinedTextField(description, { description = it }, Modifier.fillMaxWidth(), label = { Text("Descrição") }, singleLine = true)
-            OutlinedTextField(payer, { payer = it }, Modifier.fillMaxWidth(), label = { Text("Quem pagou?") }, singleLine = true)
-            Text("Privacidade do lançamento", fontWeight = FontWeight.SemiBold)
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) { listOf("shared" to "Compartilhado", "balances_only" to "Somente saldo", "private" to "Somente eu").forEach { (v, label) -> FilterChip(selected = visibility == v, onClick = { visibility = v }, label = { Text(label) }) } }
-            if (visibility != "private") { OutlinedTextField(shareText, { shareText = it }, Modifier.fillMaxWidth(), label = { Text("Minha parte (R$)") }, supportingText = { Text("O restante será atribuído ao parceiro. Deixe vazio para atribuir tudo a você.") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)) }
-            Box {
-                OutlinedButton(onClick = { categoryMenu = true }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp)) { Text("Categoria: $category") }
-                DropdownMenu(expanded = categoryMenu, onDismissRequest = { categoryMenu = false }) {
-                    Categories.all.forEach { item -> DropdownMenuItem(text = { Text(item) }, onClick = { category = item; categoryMenu = false }) }
+            OutlinedTextField(expenseDate, { expenseDate = it }, Modifier.fillMaxWidth(), label = { Text("Data (AAAA-MM-DD)") }, singleLine = true, supportingText = { Text(if (isIncome) "Informe a data em que o dinheiro entrou." else "Confira a data antes de salvar.") })
+            if (isIncome) {
+                OutlinedTextField(incomeSource, { incomeSource = it.take(60) }, Modifier.fillMaxWidth(), label = { Text("Fonte de renda") }, placeholder = { Text("Ex.: salário, trabalho extra") }, singleLine = true, supportingText = { Text("Escreva uma fonte ou escolha uma sugestão abaixo.") })
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    listOf("Salário", "Renda extra", "Benefício", "Investimentos", "Outros").forEach { source ->
+                        AssistChip(onClick = { incomeSource = source }, label = { Text(source) })
+                    }
+                }
+            } else {
+                Box {
+                    OutlinedButton(onClick = { categoryMenu = true }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp)) { Text("Categoria: $category") }
+                    DropdownMenu(expanded = categoryMenu, onDismissRequest = { categoryMenu = false }) {
+                        Categories.all.forEach { item -> DropdownMenuItem(text = { Text(item) }, onClick = { category = item; categoryMenu = false }) }
+                    }
                 }
             }
+            OutlinedTextField(description, { description = it }, Modifier.fillMaxWidth(), label = { Text(if (isIncome) "Detalhe ou observação (opcional)" else "Descrição") }, singleLine = true)
+            OutlinedTextField(payer, { payer = it }, Modifier.fillMaxWidth(), label = { Text(if (isIncome) "Quem recebeu?" else "Quem pagou?") }, singleLine = true)
+            Text("Privacidade do lançamento", fontWeight = FontWeight.SemiBold)
+            val visibilityOptions = if (isIncome) listOf("shared" to "Compartilhada", "private" to "Somente eu") else listOf("shared" to "Compartilhada", "balances_only" to "Somente saldo", "private" to "Somente eu")
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) { visibilityOptions.forEach { (value, label) -> FilterChip(selected = visibility == value, onClick = { visibility = value }, label = { Text(label) }) } }
+            if (!isIncome && visibility != "private") { OutlinedTextField(shareText, { shareText = it }, Modifier.fillMaxWidth(), label = { Text("Minha parte (R$)") }, supportingText = { Text("O restante será atribuído ao parceiro. Deixe vazio para atribuir tudo a você.") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)) }
             Button(
                 onClick = {
-                    val parsedAmount = parsePtBrNumber(amountText)
                     val parsedDate = runCatching { LocalDate.parse(expenseDate).toString() }.getOrNull()
-                    if (parsedAmount != null && parsedAmount > 0 && parsedDate != null) { val share = if (visibility == "private") parsedAmount else (parsePtBrNumber(shareText) ?: parsedAmount); if (share in 0.0..parsedAmount) onAdd(Expense(parsedAmount, category, payer.ifBlank { "Não informado" }, description.ifBlank { category }, parsedDate, createdBy=currentUserId, visibility=visibility, creatorShareAmount=share)) }
+                    val savedCategory = if (isIncome) incomeSource.trim() else category
+                    val savedVisibility = if (isIncome && visibility == "balances_only") "shared" else visibility
+                    val share = if (isIncome || savedVisibility == "private") amount else creatorShare
+                    if (amount > 0 && parsedDate != null && savedCategory.isNotBlank() && share in 0.0..amount) {
+                        onAdd(Expense(amount, savedCategory, payer.ifBlank { "Não informado" }, description.ifBlank { if (isIncome) "" else savedCategory }, parsedDate, createdBy=currentUserId, visibility=savedVisibility, creatorShareAmount=share, kind=entryKind))
+                    }
                 },
-                enabled = (parsePtBrNumber(amountText) ?: 0.0) > 0 && runCatching { LocalDate.parse(expenseDate) }.isSuccess && (visibility == "private" || (parsePtBrNumber(shareText) ?: (parsePtBrNumber(amountText) ?: 0.0)) in 0.0..(parsePtBrNumber(amountText) ?: 0.0)),
+                enabled = amount > 0 && dateIsValid && entryLabelIsValid && shareIsValid,
                 modifier = Modifier.fillMaxWidth().height(50.dp), shape = RoundedCornerShape(14.dp)
-            ) { Text("Salvar lançamento") }
+            ) { Text(if (isIncome) "Salvar renda" else "Salvar despesa") }
         }
         if (notice.isNotBlank()) NoticeCard(notice)
     }
@@ -1014,16 +1214,22 @@ private fun RegisterScreen(names: List<String>, currentUserId: String?, notice: 
 
 @Composable
 private fun InsightsScreen(expenses: List<Expense>, recurringBills: List<RecurringBill>, budgets: Map<String, Double>, goal: Double, saved: Double, monthlyContribution: Double, forecastBalanceText: String, onForecastBalance: (String) -> Unit, forecastSnapshotText: String, onForecastSnapshot: (String) -> Unit, forecastPaydayText: String, onForecastPayday: (String) -> Unit, monthlyIncome: String, onMonthlyIncome: (String) -> Unit) {
-    val grouped = expenses.filter { it.visibility == "shared" }.groupBy { it.category }.mapValues { entry -> entry.value.sumOf(Expense::amount) }.toList().sortedByDescending { it.second }
-    val total = expenses.filter { it.visibility == "shared" || it.visibility == "balances_only" }.sumOf(Expense::amount)
+    val currentMonth = YearMonth.now().toString()
+    val monthRows = expenses.filter { it.date.startsWith(currentMonth) && it.visibility != "private" }
+    val monthlyExpenses = monthRows.filter { it.kind == EntryKind.EXPENSE && (it.visibility == "shared" || it.visibility == "balances_only") }
+    val grouped = monthlyExpenses.filter { it.visibility == "shared" }.groupBy { it.category }.mapValues { entry -> entry.value.sumOf(Expense::amount) }.toList().sortedByDescending { it.second }
+    val monthlySummary = summarizeMonthlyEntries(expenses, currentMonth)
+    val total = monthlySummary.expenses
+    val incomeTotal = monthlySummary.income
     val monthsToGoal = if (goal <= saved) 0 else if (monthlyContribution > 0) kotlin.math.ceil((goal - saved) / monthlyContribution).toInt() else null
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Text("Insights", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = Ink)
         Text("Uma leitura simples do mês de vocês.", color = Muted)
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            MetricCard("Total do mês", currency(total), "despesas registradas", Modifier.weight(1f))
-            MetricCard("Registros", expenses.count { it.visibility == "shared" || it.visibility == "balances_only" }.toString(), "neste mês", Modifier.weight(1f))
+            MetricCard("Entradas", currency(incomeTotal), "compartilhadas neste mês", Modifier.weight(1f))
+            MetricCard("Despesas", currency(total), "compartilhadas neste mês", Modifier.weight(1f))
         }
+        MetricCard("Saldo do mês", currency(incomeTotal - total), "entradas menos despesas", Modifier.fillMaxWidth())
         SectionTitle("Onde o dinheiro está indo", "categorias ordenadas por valor")
         if (grouped.isEmpty()) EmptyCard("Ainda sem dados do mês", "Os insights aparecem assim que vocês começarem a registrar despesas.")
         grouped.forEachIndexed { index, (category, amount) ->
@@ -1055,12 +1261,12 @@ private fun InsightsScreen(expenses: List<Expense>, recurringBills: List<Recurri
         OutlinedTextField(forecastBalanceText, onForecastBalance, Modifier.fillMaxWidth(), label = { Text("Saldo informado no snapshot (R$)") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
         OutlinedTextField(forecastSnapshotText, onForecastSnapshot, Modifier.fillMaxWidth(), label = { Text("Data de referência (AAAA-MM-DD)") }, singleLine = true)
         OutlinedTextField(forecastPaydayText, onForecastPayday, Modifier.fillMaxWidth(), label = { Text("Próxima data de recebimento") }, singleLine = true)
-        OutlinedTextField(monthlyIncome, onMonthlyIncome, Modifier.fillMaxWidth(), label = { Text("Renda mensal informada (R$; não somada antes do recebimento)") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
+        OutlinedTextField(monthlyIncome, onMonthlyIncome, Modifier.fillMaxWidth(), label = { Text("Renda mensal prevista (R$; valor manual)") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
         val forecast = runCatching { calculateCashForecast(forecastBalanceText.toMoneyOrZero(), LocalDate.parse(forecastSnapshotText), LocalDate.now(), LocalDate.parse(forecastPaydayText), expenses, recurringBills) }.getOrNull()
         Card(colors = CardDefaults.cardColors(containerColor = Mint), shape = RoundedCornerShape(18.dp)) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(if (forecast == null) "Informe saldo e datas ISO válidas; recebimento deve ser hoje ou futuro." else "Estimativa para $forecastPaydayText: ${currency(forecast.remaining)}", fontWeight = FontWeight.Bold, color = ForestDark)
-                if (forecast != null) Text("Parte do saldo informado na data $forecastSnapshotText; subtrai despesas compartilhadas/somente-saldo após essa referência (${currency(forecast.includedExpenses)}) e recorrências compartilhadas cadastradas entre hoje e o recebimento (${currency(forecast.includedRecurring)}). Renda mensal informada: ${currency(monthlyIncome.toMoneyOrZero())}, não adicionada antes do recebimento. Itens não cadastrados não entram.", color = ForestDark, style = MaterialTheme.typography.bodySmall)
+                if (forecast != null) Text("Parte do saldo informado na data $forecastSnapshotText; subtrai despesas compartilhadas/somente-saldo após essa referência (${currency(forecast.includedExpenses)}) e recorrências compartilhadas cadastradas entre hoje e o recebimento (${currency(forecast.includedRecurring)}). A renda mensal prevista (${currency(monthlyIncome.toMoneyOrZero())}) não é adicionada antes da data de recebimento. Itens não cadastrados não entram.", color = ForestDark, style = MaterialTheme.typography.bodySmall)
                 Text("Usa somente dados informados aqui; não consulta bancos e não é saldo bancário real.", color = Muted, style = MaterialTheme.typography.bodySmall)
             }
         }
@@ -1081,6 +1287,9 @@ private fun SettingsScreen(
     onSaved: (String) -> Unit,
     monthly: String,
     onMonthly: (String) -> Unit,
+    biometricEnabled: Boolean,
+    biometricNotice: String,
+    onBiometricChange: (Boolean) -> Unit,
     onExport: suspend () -> String,
     onImport: suspend (String) -> Unit,
     onSave: () -> Unit,
@@ -1091,6 +1300,16 @@ private fun SettingsScreen(
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("Ajustes", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = Ink)
         Text("Preferências compartilhadas e informações da conta.", color = Muted)
+        Card(colors = CardDefaults.cardColors(containerColor = Color.White), shape = RoundedCornerShape(20.dp)) {
+            Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("Desbloquear com biometria", fontWeight = FontWeight.SemiBold, color = Ink)
+                    Text(if (biometricEnabled) "Ativo · bloqueia após 30 segundos fora do app." else "Use impressão digital ou rosto; o PIN/senha do aparelho é alternativa.", color = Muted, style = MaterialTheme.typography.bodySmall)
+                }
+                Switch(checked = biometricEnabled, onCheckedChange = onBiometricChange)
+            }
+        }
+        if (biometricNotice.isNotBlank()) NoticeCard(biometricNotice)
         Card(colors = CardDefaults.cardColors(containerColor = Color.White), shape = RoundedCornerShape(20.dp)) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Filled.People, contentDescription = null, tint = Forest); Spacer(Modifier.width(8.dp)); Text("Seu espaço", fontWeight = FontWeight.SemiBold) }
@@ -1110,7 +1329,7 @@ private fun SettingsScreen(
         EncryptedBackupCard(onExport = onExport, onImport = onImport)
         Divider(color = Color(0xFFE3EAE5))
         Text("A categorização por frase funciona localmente e pode errar. Revise o lançamento antes de confiar nos totais.", style = MaterialTheme.typography.bodySmall, color = Muted)
-        NoticeCard("A biometria opcional ainda não está disponível. O bloqueio biométrico não substitui a autenticação da conta. Para excluir dados compartilhados ou a conta, use os controles oficiais do serviço; este app não apaga dados do cônjuge.")
+        NoticeCard("O bloqueio deste aparelho não substitui o login da conta. Para excluir dados compartilhados ou a conta, use os controles oficiais do serviço; este app não apaga dados do cônjuge.")
         TextButton(onClick = onSignOut) { Icon(Icons.Filled.Logout, contentDescription = null); Spacer(Modifier.width(6.dp)); Text("Sair apenas deste aparelho") }
         OutlinedButton(onClick = { confirmGlobalSignOut = true }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp)) { Text("Encerrar sessões em todos os dispositivos") }
         Text("A revogação global exige internet. Se estiver offline, o logout local continua disponível; dados compartilhados não são apagados.", style = MaterialTheme.typography.bodySmall, color = Muted)
@@ -1133,7 +1352,7 @@ private fun InviteCard(code: String, expired: Boolean, onShare: () -> Unit, onRe
                 Spacer(Modifier.width(8.dp))
                 Text("Convide sua esposa", fontWeight = FontWeight.Bold, color = ForestDark)
             }
-            Text("Quando ela entrar com o código, as despesas e os ajustes passam a aparecer nos dois aparelhos.", color = ForestDark, style = MaterialTheme.typography.bodySmall)
+            Text("Quando ela entrar com o código, as rendas, despesas e ajustes compartilhados passam a aparecer nos dois aparelhos.", color = ForestDark, style = MaterialTheme.typography.bodySmall)
             Text(if (expired) "Este convite expirou." else "Código válido por 48 horas e usado uma única vez:", color = ForestDark, style = MaterialTheme.typography.labelMedium)
             if (!expired) Text(code, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Ink)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1188,22 +1407,23 @@ private fun SectionTitle(title: String, detail: String) {
 
 @Composable
 private fun ExpenseCard(expense: Expense, canDelete: Boolean, onDelete: () -> Unit) {
+    val isIncome = expense.kind == EntryKind.INCOME
     Card(colors = CardDefaults.cardColors(containerColor = Color.White), shape = RoundedCornerShape(16.dp)) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(40.dp).clip(CircleShape).background(Mint), contentAlignment = Alignment.Center) {
-                Text(expense.category.firstOrNull()?.toString() ?: "•", color = Forest, fontWeight = FontWeight.Bold)
+            Box(Modifier.size(40.dp).clip(CircleShape).background(if (isIncome) Color(0xFFE5F5EC) else Mint), contentAlignment = Alignment.Center) {
+                Text(expense.category.firstOrNull()?.toString() ?: "•", color = if (isIncome) Color(0xFF21805F) else Forest, fontWeight = FontWeight.Bold)
             }
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 if (expense.visibility == "balances_only") { Text("Despesa compartilhada", fontWeight = FontWeight.SemiBold, color = Ink); Text(expense.date, color = Muted, style = MaterialTheme.typography.labelSmall) }
-                else { Text(expense.description.ifBlank { expense.category }, fontWeight = FontWeight.SemiBold, color = Ink); Text("${expense.category} · ${expense.payer} · ${expense.date}", color = Muted, style = MaterialTheme.typography.labelSmall) }
+                else { Text(expense.description.ifBlank { if (isIncome) "Entrada de renda" else expense.category }, fontWeight = FontWeight.SemiBold, color = Ink); Text("${if (isIncome) "Fonte: " else ""}${expense.category} · ${expense.payer} · ${expense.date}", color = Muted, style = MaterialTheme.typography.labelSmall) }
                 if (expense.visibility == "private") Text("Somente você", color = Muted, style = MaterialTheme.typography.labelSmall)
-                if (expense.visibility == "shared" && expense.creatorShareAmount < expense.amount) Text("Registrador: ${currency(expense.creatorShareAmount)} · parceiro: ${currency(expense.amount - expense.creatorShareAmount)}", color = Muted, style = MaterialTheme.typography.labelSmall)
+                if (!isIncome && expense.visibility == "shared" && expense.creatorShareAmount < expense.amount) Text("Registrador: ${currency(expense.creatorShareAmount)} · parceiro: ${currency(expense.amount - expense.creatorShareAmount)}", color = Muted, style = MaterialTheme.typography.labelSmall)
                 if (!expense.synced) Text("Aguardando sincronização", color = Color(0xFF9A6500), style = MaterialTheme.typography.labelSmall)
             }
-            Text(currency(expense.amount), fontWeight = FontWeight.Bold, color = Ink)
+            Text("${if (isIncome) "+" else "−"} ${currency(expense.amount)}", fontWeight = FontWeight.Bold, color = if (isIncome) Color(0xFF21805F) else Ink)
             if (canDelete) {
-                IconButton(onClick = onDelete) { Icon(Icons.Filled.Delete, contentDescription = "Excluir despesa", tint = Muted) }
+                IconButton(onClick = onDelete) { Icon(Icons.Filled.Delete, contentDescription = "Excluir lançamento", tint = Muted) }
             }
         }
     }

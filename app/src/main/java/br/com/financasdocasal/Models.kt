@@ -6,6 +6,7 @@ import java.util.Date
 import java.util.Locale
 import java.util.UUID
 
+object EntryKind { const val EXPENSE = "expense"; const val INCOME = "income" }
 object Categories {
     val all = listOf("Alimentação", "Mercado", "Moradia", "Transporte", "Lazer", "Saúde", "Educação", "Delivery", "Outros")
 }
@@ -26,7 +27,8 @@ data class Expense(
     val creatorShareAmount: Double = amount,
     val reviewStatus: String = "pending",
     val reviewedBy: String? = null,
-    val reviewedAt: String? = null
+    val reviewedAt: String? = null,
+    val kind: String = EntryKind.EXPENSE
 )
 
 data class RecurringBill(

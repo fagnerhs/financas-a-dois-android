@@ -21,6 +21,7 @@ fun calculateCashForecast(
 ): CashForecast {
     require(!payday.isBefore(today)) { "A próxima data de recebimento deve ser igual ou posterior a hoje" }
     val expenseTotal = expenses.asSequence()
+        .filter { it.kind != EntryKind.INCOME }
         .filter { it.visibility == "shared" || it.visibility == "balances_only" }
         .filter { runCatching { LocalDate.parse(it.date).isAfter(referenceDate) && !LocalDate.parse(it.date).isAfter(payday) }.getOrDefault(false) }
         .sumOf { it.amount.coerceAtLeast(0.0) }
