@@ -32,11 +32,11 @@ object SupabaseCloud {
     suspend fun signIn(email:String,password:String) { client.auth.signInWith(Email) { this.email=email.trim(); this.password=password } }
     suspend fun signOut()=client.auth.signOut()
     suspend fun signOutEverywhere()=client.auth.signOut(io.github.jan.supabase.auth.SignOutScope.GLOBAL)
-    suspend fun createSpace(name:String,displayName:String):SpaceInviteDto=client.postgrest.rpc("create_couple_space",CreateSpaceArgs(name.trim(),displayName.trim())).decodeSingle()
+    suspend fun createSpace(name:String,displayName:String):SpaceInviteDto=client.postgrest.rpc("create_couple_space",CreateSpaceArgs(name.trim(),displayName.trim())).decodeAs<SpaceInviteDto>()
     suspend fun joinSpace(code:String,displayName:String) { client.postgrest.rpc("join_couple_space",JoinSpaceArgs(code.trim(),displayName.trim())).decodeAs<String>() }
-    suspend fun refreshInvite(spaceId:String):SpaceInviteRefreshDto=client.postgrest.rpc("refresh_couple_invite",RefreshInviteArgs(spaceId)).decodeSingle()
+    suspend fun refreshInvite(spaceId:String):SpaceInviteRefreshDto=client.postgrest.rpc("refresh_couple_invite",RefreshInviteArgs(spaceId)).decodeAs<SpaceInviteRefreshDto>()
     suspend fun findMySpace(userId:String):CoupleSpaceDto? {
-        val membership=client.from("couple_members").select { filter { eq("user_id",userId) } }.decodeList<CoupleMemberDto>().firstOrNull() ?: return null
+        val membership=client.from("couple_members").select { filter { eq("user_id",userId) } }.decodeList<CoupleMemberDto>().minByOrNull { it.spaceId } ?: return null
         val space=client.from("couple_spaces").select { filter { eq("id",membership.spaceId) } }.decodeList<CoupleSpaceDto>().firstOrNull() ?: return null
         return space.copy(members=client.from("couple_members").select { filter { eq("space_id",space.id) } }.decodeList())
     }
