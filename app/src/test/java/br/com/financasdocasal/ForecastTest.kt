@@ -27,8 +27,8 @@ class ForecastTest {
             RecurringBill(amount = 20.0, nextDate = "2026-10-10", frequency = "biweekly")
         )
         val result = calculateCashForecast(200.0, snapshot, today, payday, emptyList(), bills)
-        assertEquals(80.0, result.includedRecurring, 0.001) // weekly: 10/10, 17, 24, 31; biweekly: 10/10, 24
-        assertEquals(120.0, result.remaining, 0.001)
+        assertEquals(110.0, result.includedRecurring, 0.001) // weekly: 10/10 a 07/11; biweekly: 10/10, 24/10 e 07/11
+        assertEquals(90.0, result.remaining, 0.001)
     }
 
     @Test fun monthlyAndYearlyRecurrencesRespectHorizonAndPrivateVisibility() {
