@@ -1,4 +1,4 @@
-# Finanças a Dois — Android 1.3.0
+# Finanças a Dois — Android 1.3.1
 
 Aplicativo Android nativo para organizar entradas de renda e despesas do casal com lançamentos manuais, contas individuais e espaço compartilhado. Não conecta a bancos e não importa movimentações bancárias. A sincronização entre aparelhos usa o projeto Supabase já configurado no aplicativo; sem internet, os dados ficam na fila local e são enviados quando a conexão voltar.
 
@@ -9,7 +9,7 @@ Aplicativo Android nativo para organizar entradas de renda e despesas do casal c
 3. Use exatamente o mesmo APK nos dois celulares. No primeiro, crie uma conta com seu e-mail e senha e crie o espaço do casal. Toque em **Compartilhar convite** e envie o código à sua esposa. No segundo, crie outra conta e escolha **Tenho um código de convite**. Não compartilhem senhas. O convite é de uso único e expira em 48 horas.
 4. Se o projeto exigir confirmação de e-mail, abra primeiro a mensagem de confirmação recebida. Depois entre no aplicativo nos dois aparelhos. Opcionalmente, ative o desbloqueio biométrico em **Ajustes** em cada celular.
 
-Se a versão 1.2.0 mostrou erro ao criar o espaço, não repita a ação no APK antigo: o servidor pode ter aceitado a solicitação apesar do aviso. As versões 1.2.1 e 1.2.3 corrigiram problemas de criação do espaço e da tela **Planejar**; a versão 1.3.0 acrescenta o cadastro de rendas e o bloqueio biométrico.
+Se a versão 1.2.0 mostrou erro ao criar o espaço, não repita a ação no APK antigo: o servidor pode ter aceitado a solicitação apesar do aviso. As versões 1.2.1 e 1.2.3 corrigiram problemas de criação do espaço e da tela **Planejar**; a versão 1.3.0 acrescentou rendas e biometria; a 1.3.1 facilita o registro de aportes e mostra sugestões locais de economia.
 
 Se o cadastro mostrar um limite temporário de envio de e-mail, aguarde o limite do provedor liberar e tente criar a conta uma única vez; tentativas repetidas podem gerar novas recusas temporárias.
 
@@ -23,7 +23,9 @@ A assinatura temporária também significa que futuras versões precisarão ser 
 
 A aba **Registrar** alterna entre **Renda** e **Despesa**. Para renda, informe uma fonte personalizada (por exemplo, salário ou trabalho extra); para despesa, escolha uma categoria, divida o valor se quiser ou use frase/OCR para agilizar. O painel e os Insights mostram entradas, despesas e saldo compartilhados separadamente. O OCR apenas sugere valor, data e estabelecimento: confira e corrija os campos antes de salvar. A imagem e o texto reconhecido não são enviados pelo fluxo de OCR.
 
-**Planejamento** inclui contas recorrentes e metas. Ao tocar em **Confirmar que foi paga**, o aplicativo cria um lançamento manual e avança o vencimento seguinte; não realiza pagamentos nem consulta bancos. **Insights** mostra totais, categorias, limites e previsões informadas manualmente.
+**Planejamento** inclui contas recorrentes e metas. Ao tocar em **Confirmar que foi paga**, o aplicativo cria um lançamento manual e avança o vencimento seguinte; não realiza pagamentos nem consulta bancos. Em **Insights → Reserva de emergência**, informe cada novo aporte e toque em **Adicionar à reserva**: o valor é somado ao total compartilhado, sem criar uma renda ou despesa fictícia. Insights também mostra totais, categorias, limites e previsões informadas manualmente.
+
+**Sugestões para economizar** ficam em Insights. Na versão 1.3.1, são regras explicáveis calculadas no aparelho a partir das despesas compartilhadas com categoria visível e dos limites definidos; itens privados e somente-saldo são ignorados. Não existe IA generativa conectada e nenhum lançamento é enviado a um modelo externo.
 
 Cada casal usa contas separadas. Lançamentos podem ser compartilhados, visíveis somente para o saldo ou privados. Lançamentos privados não são exibidos ao parceiro; a opção de saldo compartilhado mostra o valor e a data, sem categoria, descrição, pagador ou divisão. Cada membro só pode alterar ou excluir lançamentos que criou. O acesso à nuvem é protegido por autenticação e políticas de acesso do banco de dados.
 
@@ -41,6 +43,6 @@ O app já vem apontado para o projeto `financas-casal`; não é necessário cria
 
 O workflow `.github/workflows/build.yml` executa os testes unitários, compila o release, assina e verifica o APK e publica o artefato `financas-casal-apk` por 30 dias. O build usa Android SDK 36, Java 17 e Gradle 8.14.4. Para iniciar manualmente, abra **Actions → Build APK assinado → Run workflow**; ao terminar, baixe `app-release-signed.apk` em **Artifacts**.
 
-`./gradlew test` cobre parser, valores, previsão, OCR, backup e regras de previsão sem subtrair renda já registrada. A compilação e a assinatura são verificadas pelo workflow. Login, convite, sincronização Realtime, autenticação biométrica em aparelho real, OCR real e instalação precisam ser verificados em aparelhos ou emuladores Android; os testes unitários, sozinhos, não comprovam esses fluxos ponta a ponta.
+`./gradlew test` cobre parser, valores, previsão, OCR, backup, soma dos aportes e filtros da análise local de economia. A compilação e a assinatura são verificadas pelo workflow. Login, convite, sincronização Realtime, autenticação biométrica em aparelho real, OCR real e instalação precisam ser verificados em aparelhos ou emuladores Android; os testes unitários, sozinhos, não comprovam esses fluxos ponta a ponta.
 
 As migrations SQL estão em `supabase/migrations/`. As fontes técnicas e decisões de segurança estão em `docs/roteiro-inovacoes-seguranca.md` e `docs/fontes-tecnicas.md`.

@@ -657,6 +657,27 @@ fun FinanceApp(store: LocalStore, recoveryLinkActive: Boolean = false) {
     val memberNames = currentSpace.members.map { it.displayName }
     val inviteExpired = runCatching { Instant.parse(currentSpace.inviteExpiresAt).isBefore(Instant.now()) }.getOrDefault(false)
 
+    fun addReserveContribution(amount: Double) {
+        val updatedTotal = updatedReserveTotal(emergencySaved.toMoneyOrZero(), amount)
+        if (updatedTotal == null) {
+            notice = "Informe um aporte válido entre R$ 0,01 e o limite permitido."
+            return
+        }
+        emergencySaved = String.format(Locale.US, "%.2f", updatedTotal)
+        prefs.edit().putSecureString("saved", emergencySaved).putBoolean("settings_dirty", true).apply()
+        val amountLabel = currency(amount)
+        notice = "Aporte de $amountLabel somado à reserva; sincronizando…"
+        scope.launch {
+            try {
+                saveLocalSettingsToCloud(currentSpace.id)
+                notice = "Aporte de $amountLabel somado e compartilhado com seu par."
+            } catch (_: Exception) {
+                syncNotice = "Offline · aporte da reserva aguardando sincronização"
+                notice = "Aporte de $amountLabel salvo neste aparelho; será compartilhado quando houver conexão."
+            }
+        }
+    }
+
     Scaffold(
         containerColor = Canvas,
         topBar = {
@@ -795,7 +816,7 @@ fun FinanceApp(store: LocalStore, recoveryLinkActive: Boolean = false) {
                         }
                     }
                 )
-                2 -> InsightsScreen(expenses = rows, recurringBills = bills, budgets = budgets, goal = emergencyGoal.toMoneyOrZero(), saved = emergencySaved.toMoneyOrZero(), monthlyContribution = monthlyContribution.toMoneyOrZero(), forecastBalanceText = forecastBalance, onForecastBalance = { forecastBalance = it }, forecastSnapshotText = forecastAsOf, onForecastSnapshot = { forecastAsOf = it }, forecastPaydayText = forecastPayday, onForecastPayday = { forecastPayday = it }, monthlyIncome = monthlyIncome, onMonthlyIncome = { monthlyIncome = it })
+                2 -> InsightsScreen(expenses = rows, recurringBills = bills, budgets = budgets, goal = emergencyGoal.toMoneyOrZero(), saved = emergencySaved.toMoneyOrZero(), monthlyContribution = monthlyContribution.toMoneyOrZero(), forecastBalanceText = forecastBalance, onForecastBalance = { forecastBalance = it }, forecastSnapshotText = forecastAsOf, onForecastSnapshot = { forecastAsOf = it }, forecastPaydayText = forecastPayday, onForecastPayday = { forecastPayday = it }, monthlyIncome = monthlyIncome, onMonthlyIncome = { monthlyIncome = it }, onAddReserveContribution = { amount -> addReserveContribution(amount) })
                 3 -> PlanningScreen(
                     bills = bills, goals = goals,
                     forecastLabel = "Projeção manual: saldo informado em $forecastAsOf; recebimento previsto para $forecastPayday. Renda mensal informada de ${currency(monthlyIncome.toMoneyOrZero())} não é somada antes do recebimento.",
@@ -1213,8 +1234,10 @@ private fun RegisterScreen(names: List<String>, currentUserId: String?, notice: 
 }
 
 @Composable
-private fun InsightsScreen(expenses: List<Expense>, recurringBills: List<RecurringBill>, budgets: Map<String, Double>, goal: Double, saved: Double, monthlyContribution: Double, forecastBalanceText: String, onForecastBalance: (String) -> Unit, forecastSnapshotText: String, onForecastSnapshot: (String) -> Unit, forecastPaydayText: String, onForecastPayday: (String) -> Unit, monthlyIncome: String, onMonthlyIncome: (String) -> Unit) {
+private fun InsightsScreen(expenses: List<Expense>, recurringBills: List<RecurringBill>, budgets: Map<String, Double>, goal: Double, saved: Double, monthlyContribution: Double, forecastBalanceText: String, onForecastBalance: (String) -> Unit, forecastSnapshotText: String, onForecastSnapshot: (String) -> Unit, forecastPaydayText: String, onForecastPayday: (String) -> Unit, monthlyIncome: String, onMonthlyIncome: (String) -> Unit, onAddReserveContribution: (Double) -> Unit) {
     val currentMonth = YearMonth.now().toString()
+    var reserveContributionText by remember { mutableStateOf("") }
+    var reserveFeedback by remember { mutableStateOf("") }
     val monthRows = expenses.filter { it.date.startsWith(currentMonth) && it.visibility != "private" }
     val monthlyExpenses = monthRows.filter { it.kind == EntryKind.EXPENSE && (it.visibility == "shared" || it.visibility == "balances_only") }
     val grouped = monthlyExpenses.filter { it.visibility == "shared" }.groupBy { it.category }.mapValues { entry -> entry.value.sumOf(Expense::amount) }.toList().sortedByDescending { it.second }
@@ -1222,6 +1245,7 @@ private fun InsightsScreen(expenses: List<Expense>, recurringBills: List<Recurri
     val total = monthlySummary.expenses
     val incomeTotal = monthlySummary.income
     val monthsToGoal = if (goal <= saved) 0 else if (monthlyContribution > 0) kotlin.math.ceil((goal - saved) / monthlyContribution).toInt() else null
+    val savingOpportunities = remember(expenses, budgets, currentMonth) { analyzeSavingsOpportunities(expenses, budgets, currentMonth) }
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Text("Insights", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = Ink)
         Text("Uma leitura simples do mês de vocês.", color = Muted)
@@ -1230,6 +1254,26 @@ private fun InsightsScreen(expenses: List<Expense>, recurringBills: List<Recurri
             MetricCard("Despesas", currency(total), "compartilhadas neste mês", Modifier.weight(1f))
         }
         MetricCard("Saldo do mês", currency(incomeTotal - total), "entradas menos despesas", Modifier.fillMaxWidth())
+        SectionTitle("Sugestões para economizar", "análise automática feita no aparelho")
+        if (savingOpportunities.isEmpty()) {
+            EmptyCard("Ainda não há sugestões", "Quando houver despesas compartilhadas categorizadas neste mês, mostraremos a maior categoria e os limites ultrapassados.")
+        } else {
+            savingOpportunities.forEach { opportunity ->
+                val overBudget = opportunity.amountOverBudget
+                val detail = if (overBudget > 0.0) {
+                    "${currency(opportunity.amount)} em ${opportunity.transactionCount} lançamento(s); passou do limite de ${currency(opportunity.budgetLimit ?: 0.0)} por ${currency(overBudget)}. Confiram se foi algo pontual ou se desejam rever o limite."
+                } else {
+                    "${currency(opportunity.amount)} em ${opportunity.transactionCount} lançamento(s), ${(opportunity.shareOfCategorizedSpending * 100).toInt()}% das despesas categorizadas compartilhadas. Revisem juntos se há algo recorrente que faça sentido ajustar."
+                }
+                Card(colors = CardDefaults.cardColors(containerColor = Color.White), shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                        Text(if (overBudget > 0.0) "${opportunity.category}: acima do limite" else "${opportunity.category}: categoria para revisar", fontWeight = FontWeight.SemiBold, color = Ink)
+                        Text(detail, color = Muted, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
+        }
+        Text("Importante: esta versão ainda não integra uma IA generativa. As sugestões usam regras locais, consideram apenas despesas compartilhadas com categoria visível e não enviam lançamentos a modelos externos.", color = Muted, style = MaterialTheme.typography.bodySmall)
         SectionTitle("Onde o dinheiro está indo", "categorias ordenadas por valor")
         if (grouped.isEmpty()) EmptyCard("Ainda sem dados do mês", "Os insights aparecem assim que vocês começarem a registrar despesas.")
         grouped.forEachIndexed { index, (category, amount) ->
@@ -1246,7 +1290,7 @@ private fun InsightsScreen(expenses: List<Expense>, recurringBills: List<Recurri
                 }
             }
         }
-        SectionTitle("Plano do fundo de emergência", "estimativa simples, sem aconselhamento financeiro")
+        SectionTitle("Reserva de emergência", "adicione cada aporte ao total compartilhado")
         Card(colors = CardDefaults.cardColors(containerColor = Color.White), shape = RoundedCornerShape(20.dp)) {
             Column(Modifier.padding(18.dp)) {
                 Text("${currency(saved)} guardados de ${currency(goal)}", fontWeight = FontWeight.SemiBold, color = Ink)
@@ -1255,6 +1299,33 @@ private fun InsightsScreen(expenses: List<Expense>, recurringBills: List<Recurri
                 LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth().height(7.dp).clip(CircleShape), color = Forest, trackColor = Color(0xFFE8EEEA))
                 Spacer(Modifier.height(10.dp))
                 Text(if (monthsToGoal == null) "Definam um aporte mensal nos Ajustes para estimar o prazo." else if (monthsToGoal == 0) "Meta alcançada. Parabéns por esse marco!" else "Com ${currency(monthlyContribution)} por mês, a meta fica a aproximadamente $monthsToGoal meses." , color = Muted)
+                Spacer(Modifier.height(12.dp))
+                val contributionAmount = parsePtBrNumber(reserveContributionText)?.takeIf { it.isFinite() && it >= 0.01 }
+                val totalAfterContribution = contributionAmount?.let { updatedReserveTotal(saved, it) }
+                OutlinedTextField(
+                    value = reserveContributionText,
+                    onValueChange = { reserveContributionText = it; reserveFeedback = "" },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Quanto guardaram agora? (R$)") },
+                    supportingText = { Text("Este valor será somado ao total; não cria uma despesa nem uma renda.") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
+                )
+                Button(
+                    onClick = {
+                        val amount = contributionAmount
+                        val totalAfter = totalAfterContribution
+                        if (amount != null && totalAfter != null) {
+                            onAddReserveContribution(amount)
+                            reserveFeedback = "Novo total: ${currency(totalAfter)}. A sincronização com seu par é automática."
+                            reserveContributionText = ""
+                        }
+                    },
+                    enabled = totalAfterContribution != null,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp)
+                ) { Text("Adicionar à reserva") }
+                if (reserveFeedback.isNotBlank()) Text(reserveFeedback, color = Forest, style = MaterialTheme.typography.bodySmall)
             }
         }
         SectionTitle("Previsão até o próximo recebimento", "projeção manual; não é saldo bancário")
@@ -1322,7 +1393,7 @@ private fun SettingsScreen(
         OutlinedTextField(budgetText, onBudgetText, Modifier.fillMaxWidth(), label = { Text("Ex.: Mercado=1200") }, minLines = 4, supportingText = { Text("Use uma categoria do app, sinal de igual e o valor. Ex.: Moradia=2500") })
         SectionTitle("Fundo de emergência", "os valores são compartilhados")
         OutlinedTextField(goal, onGoal, Modifier.fillMaxWidth(), label = { Text("Meta total (R$)") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
-        OutlinedTextField(saved, onSaved, Modifier.fillMaxWidth(), label = { Text("Valor já guardado (R$)") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
+        OutlinedTextField(saved, onSaved, Modifier.fillMaxWidth(), label = { Text("Total já acumulado na reserva (R$)") }, supportingText = { Text("Para somar um novo aporte sem substituir o total, use Insights → Reserva de emergência.") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
         OutlinedTextField(monthly, onMonthly, Modifier.fillMaxWidth(), label = { Text("Aporte mensal planejado (R$)") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
         Button(onClick = onSave, modifier = Modifier.fillMaxWidth().height(50.dp), shape = RoundedCornerShape(14.dp)) { Text("Salvar e compartilhar ajustes") }
         TotpManagementCard()
