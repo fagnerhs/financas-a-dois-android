@@ -18,7 +18,7 @@ class EntrySummaryTest {
 
         assertEquals(1000.0, summary.income, 0.0)
         assertEquals(280.0, summary.expenses, 0.0)
-        assertEquals(-720.0, summary.net, 0.0)
+        assertEquals(720.0, summary.net, 0.0)
         assertEquals(3, summary.movementCount)
     }
 }
