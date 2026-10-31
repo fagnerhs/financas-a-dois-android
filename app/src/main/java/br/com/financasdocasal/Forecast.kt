@@ -3,13 +3,14 @@ package br.com.financasdocasal
 import java.time.LocalDate
 
 /** Resultado determinístico; não representa saldo bancário nem consulta instituições financeiras. */
-data class CashForecast(val remaining: Double, val includedExpenses: Double, val includedRecurring: Double)
+data class CashForecast(val remaining: Double, val includedExpenses: Double, val includedRecurring: Double, val includedCardPayments: Double = 0.0)
 
 /**
  * Projeta a partir de um saldo manual informado em referenceDate até payday.
  * Despesas são consideradas apenas quando posteriores ao snapshot; private é excluído e
  * balances_only contribui exclusivamente com amount/date. Recorrências ativas e visíveis
- * são repetidas segundo sua frequência entre nextDate e payday, após referenceDate.
+ * são repetidas segundo sua frequência entre nextDate e payday, após referenceDate. Compras
+ * de cartão não são fluxo de caixa; uma fatura só reduz o saldo quando marcada como paga.
  */
 fun calculateCashForecast(
     manualBalance: Double,
@@ -17,7 +18,8 @@ fun calculateCashForecast(
     today: LocalDate,
     payday: LocalDate,
     expenses: List<Expense>,
-    recurringBills: List<RecurringBill>
+    recurringBills: List<RecurringBill>,
+    creditCardCycles: List<CreditCardCycle> = emptyList()
 ): CashForecast {
     require(!payday.isBefore(today)) { "A próxima data de recebimento deve ser igual ou posterior a hoje" }
     val expenseTotal = expenses.asSequence()
@@ -57,5 +59,12 @@ fun calculateCashForecast(
             }
             total
         }
-    return CashForecast(manualBalance - expenseTotal - recurringTotal, expenseTotal, recurringTotal)
+    val cardPaymentTotal = creditCardCycles.asSequence()
+        .filter { it.closedAt != null && it.paidAt != null && it.statementAmount > 0.0 }
+        .filter { cycle ->
+            val paidDate = cycle.paidAt?.take(10)?.let { runCatching { LocalDate.parse(it) }.getOrNull() } ?: return@filter false
+            paidDate.isAfter(referenceDate) && !paidDate.isAfter(payday)
+        }
+        .sumOf { it.statementAmount }
+    return CashForecast(manualBalance - expenseTotal - recurringTotal - cardPaymentTotal, expenseTotal, recurringTotal, cardPaymentTotal)
 }

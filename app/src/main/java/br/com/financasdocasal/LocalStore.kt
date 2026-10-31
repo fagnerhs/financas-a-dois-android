@@ -9,7 +9,7 @@ import org.json.JSONObject
 import java.time.LocalDate
 import java.util.UUID
 
-class LocalStore(context: Context) : SQLiteOpenHelper(context, "financas.db", null, 7) {
+class LocalStore(context: Context) : SQLiteOpenHelper(context, "financas.db", null, 8) {
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL("""CREATE TABLE expenses(id INTEGER PRIMARY KEY AUTOINCREMENT,remote_id TEXT NOT NULL UNIQUE,amount TEXT NOT NULL,category TEXT NOT NULL,payer TEXT NOT NULL,description TEXT NOT NULL,date TEXT NOT NULL,created_by TEXT,synced INTEGER NOT NULL DEFAULT 0,visibility TEXT NOT NULL DEFAULT 'shared',creator_share_amount TEXT NOT NULL DEFAULT '0',review_status TEXT NOT NULL DEFAULT 'pending',reviewed_by TEXT,reviewed_at TEXT,kind TEXT NOT NULL DEFAULT 'expense')""")
         createProductTables(db)
@@ -17,6 +17,8 @@ class LocalStore(context: Context) : SQLiteOpenHelper(context, "financas.db", nu
     private fun createProductTables(db: SQLiteDatabase) {
         db.execSQL("""CREATE TABLE IF NOT EXISTS recurring_bills(id TEXT PRIMARY KEY,space_id TEXT NOT NULL,amount TEXT NOT NULL,category TEXT NOT NULL,payer TEXT NOT NULL,description TEXT NOT NULL,next_date TEXT NOT NULL,frequency TEXT NOT NULL,is_active INTEGER NOT NULL,visibility TEXT NOT NULL,created_by TEXT,synced INTEGER NOT NULL DEFAULT 0)""")
         db.execSQL("""CREATE TABLE IF NOT EXISTS savings_goals(id TEXT PRIMARY KEY,space_id TEXT NOT NULL,name TEXT NOT NULL,target_amount TEXT NOT NULL,saved_amount TEXT NOT NULL,monthly_contribution TEXT NOT NULL,target_date TEXT,created_by TEXT,synced INTEGER NOT NULL DEFAULT 0)""")
+        db.execSQL("""CREATE TABLE IF NOT EXISTS credit_card_cycles(id TEXT PRIMARY KEY,space_id TEXT NOT NULL,opened_at TEXT NOT NULL,closed_at TEXT,statement_amount TEXT NOT NULL,closed_by TEXT,paid_at TEXT,paid_by TEXT,synced INTEGER NOT NULL DEFAULT 0)""")
+        db.execSQL("""CREATE TABLE IF NOT EXISTS credit_card_purchases(id TEXT PRIMARY KEY,space_id TEXT NOT NULL,cycle_id TEXT NOT NULL,amount TEXT NOT NULL,category TEXT NOT NULL,description TEXT NOT NULL,purchase_date TEXT NOT NULL,payer TEXT NOT NULL,created_by TEXT,synced INTEGER NOT NULL DEFAULT 0)""")
     }
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
         if (oldVersion < 2) {
@@ -45,6 +47,7 @@ class LocalStore(context: Context) : SQLiteOpenHelper(context, "financas.db", nu
             db.execSQL("ALTER TABLE expenses_v6 RENAME TO expenses")
         }
         if (oldVersion == 6) db.execSQL("ALTER TABLE expenses ADD COLUMN kind TEXT NOT NULL DEFAULT 'expense'")
+        if (oldVersion < 8) createProductTables(db)
     }
 
     fun add(expense: Expense): Expense {
@@ -84,6 +87,28 @@ class LocalStore(context: Context) : SQLiteOpenHelper(context, "financas.db", nu
     fun upsertRemoteSavingsGoal(goal: SavingsGoal) { writableDatabase.insertWithOnConflict("savings_goals",null,goalValues(goal.copy(synced=true)),SQLiteDatabase.CONFLICT_REPLACE) }
     fun deleteSavingsGoal(id: String) { writableDatabase.delete("savings_goals", "id=?", arrayOf(id)) }
     fun reconcileVisibleSavingsGoals(ids: Set<String>) = deleteMissingSynced("savings_goals", "id", ids)
+    fun addCreditCardCycle(cycle: CreditCardCycle): CreditCardCycle { val c=cycle.withStableCycleId(); writableDatabase.insertWithOnConflict("credit_card_cycles",null,cycleValues(c),SQLiteDatabase.CONFLICT_REPLACE); return c }
+    fun creditCardCycles(): List<CreditCardCycle> = readCycles("SELECT id,space_id,opened_at,closed_at,statement_amount,closed_by,paid_at,paid_by,synced FROM credit_card_cycles ORDER BY opened_at DESC,id")
+    fun pendingCreditCardCycles(): List<CreditCardCycle> = readCycles("SELECT id,space_id,opened_at,closed_at,statement_amount,closed_by,paid_at,paid_by,synced FROM credit_card_cycles WHERE synced=0 ORDER BY opened_at,id")
+    fun markCreditCardCycleSynced(id: String) { writableDatabase.execSQL("UPDATE credit_card_cycles SET synced=1 WHERE id=?",arrayOf(id)) }
+    fun upsertRemoteCreditCardCycle(cycle: CreditCardCycle, force: Boolean = false) {
+        val c=cycle.copy(synced=true).withStableCycleId(); val db=writableDatabase
+        if (!force && db.update("credit_card_cycles",cycleValues(c),"id=? AND synced=1",arrayOf(c.id))==0) {
+            val exists=db.rawQuery("SELECT 1 FROM credit_card_cycles WHERE id=?",arrayOf(c.id)).use { it.moveToFirst() }
+            if (!exists) db.insertWithOnConflict("credit_card_cycles",null,cycleValues(c),SQLiteDatabase.CONFLICT_REPLACE)
+        }
+    }
+    fun deleteCreditCardCycle(id: String) { writableDatabase.delete("credit_card_cycles","id=?",arrayOf(id)) }
+    fun reconcileCreditCardCycles(ids: Set<String>) = deleteMissingSynced("credit_card_cycles","id",ids)
+
+    fun addCreditCardPurchase(purchase: CreditCardPurchase): CreditCardPurchase { val p=purchase.withStablePurchaseId(); writableDatabase.insertWithOnConflict("credit_card_purchases",null,purchaseValues(p),SQLiteDatabase.CONFLICT_REPLACE); return p }
+    fun creditCardPurchases(): List<CreditCardPurchase> = readPurchases("SELECT id,space_id,cycle_id,amount,category,description,purchase_date,payer,created_by,synced FROM credit_card_purchases ORDER BY purchase_date DESC,id")
+    fun pendingCreditCardPurchases(): List<CreditCardPurchase> = readPurchases("SELECT id,space_id,cycle_id,amount,category,description,purchase_date,payer,created_by,synced FROM credit_card_purchases WHERE synced=0 ORDER BY purchase_date,id")
+    fun markCreditCardPurchaseSynced(id: String) { writableDatabase.execSQL("UPDATE credit_card_purchases SET synced=1 WHERE id=?",arrayOf(id)) }
+    fun upsertRemoteCreditCardPurchase(purchase: CreditCardPurchase) { val p=purchase.copy(synced=true).withStablePurchaseId(); writableDatabase.insertWithOnConflict("credit_card_purchases",null,purchaseValues(p),SQLiteDatabase.CONFLICT_REPLACE) }
+    fun deleteCreditCardPurchase(id: String) { writableDatabase.delete("credit_card_purchases","id=?",arrayOf(id)) }
+    fun reconcileCreditCardPurchases(ids: Set<String>) = deleteMissingSynced("credit_card_purchases","id",ids)
+
     /** Remove only cloud-cached rows during an account switch; the remote data and offline queues remain untouched. */
     fun clearSyncedCache() {
         val db = writableDatabase
@@ -92,6 +117,8 @@ class LocalStore(context: Context) : SQLiteOpenHelper(context, "financas.db", nu
             db.delete("expenses", "synced=1", null)
             db.delete("recurring_bills", "synced=1", null)
             db.delete("savings_goals", "synced=1", null)
+            db.delete("credit_card_cycles", "synced=1", null)
+            db.delete("credit_card_purchases", "synced=1", null)
             db.setTransactionSuccessful()
         } finally { db.endTransaction() }
     }
@@ -109,13 +136,13 @@ class LocalStore(context: Context) : SQLiteOpenHelper(context, "financas.db", nu
     /** Events are remote audit data; this maps DTO values without persisting sensitive snapshots. */
     fun expenseEvents(events: List<ExpenseEvent>): List<ExpenseEvent> = events
 
-    fun importJson(raw: String, ownerId: String? = null) {
+    fun importJson(raw: String, ownerId: String? = null, activeSpaceId: String? = null) {
         val root = runCatching { JSONObject(raw) }.getOrNull()
         val expenseArray = if (root == null) runCatching { JSONArray(raw) }.getOrElse { throw IllegalArgumentException("Formato de backup inválido") }
             else root.optJSONArray("expenses") ?: root.optJSONArray("data") ?: JSONArray()
         val version = root?.optInt("schemaVersion", 0) ?: 0
-        require(version in 0..4) { "Versão de backup não suportada" }
-        require(expenseArray.length() > 0 || root?.has("recurringBills") == true || root?.has("savingsGoals") == true) { "Nenhum dado de backup reconhecido" }
+        require(version in 0..6) { "Versão de backup não suportada" }
+        require(expenseArray.length() > 0 || root?.has("recurringBills") == true || root?.has("savingsGoals") == true || root?.has("creditCardCycles") == true || root?.has("creditCardPurchases") == true) { "Nenhum dado de backup reconhecido" }
         writableDatabase.beginTransaction()
         try {
             for (i in 0 until expenseArray.length()) {
@@ -148,16 +175,36 @@ class LocalStore(context: Context) : SQLiteOpenHelper(context, "financas.db", nu
                     addSavingsGoal(SavingsGoal(id=UUID.randomUUID().toString(),name=o.optString("name"),targetAmount=target,savedAmount=saved,monthlyContribution=monthly,targetDate=date,createdBy=ownerId))
                 }
             } }
+            root?.optJSONArray("creditCardCycles")?.let { a -> for(i in 0 until a.length()) a.optJSONObject(i)?.let { o ->
+                val amount=o.optDouble("statementAmount",0.0); val opened=o.optString("openedAt","")
+                val closed=o.optString("closedAt","").takeIf { it.isNotBlank() }; val paid=o.optString("paidAt","").takeIf { it.isNotBlank() }
+                val id=o.optString("id",UUID.randomUUID().toString()).takeIf { runCatching { UUID.fromString(it) }.isSuccess } ?: UUID.randomUUID().toString()
+                if(amount.isFinite() && amount in 0.0..1_000_000.0 && opened.isNotBlank()) addCreditCardCycle(CreditCardCycle(id=id,spaceId=activeSpaceId ?: o.optString("spaceId",""),openedAt=opened,closedAt=closed,statementAmount=amount,closedBy=o.optString("closedBy","").takeIf { it.isNotBlank() },paidAt=paid,paidBy=o.optString("paidBy","").takeIf { it.isNotBlank() },synced=o.optBoolean("synced",false)))
+            } }
+            root?.optJSONArray("creditCardPurchases")?.let { a -> for(i in 0 until a.length()) a.optJSONObject(i)?.let { o ->
+                val amount=o.optDouble("amount",0.0); val date=o.optString("purchaseDate",""); val category=o.optString("category","Outros").takeIf { it in Categories.all } ?: "Outros"
+                val id=o.optString("id",UUID.randomUUID().toString()).takeIf { runCatching { UUID.fromString(it) }.isSuccess } ?: UUID.randomUUID().toString()
+                val cycleId=o.optString("cycleId","").takeIf { runCatching { UUID.fromString(it) }.isSuccess } ?: continue
+                if(amount.isFinite() && amount in 0.01..1_000_000.0 && runCatching { LocalDate.parse(date) }.isSuccess) addCreditCardPurchase(CreditCardPurchase(id=id,spaceId=activeSpaceId ?: o.optString("spaceId",""),cycleId=cycleId,amount=amount,category=category,description=o.optString("description","").take(240),purchaseDate=date,payer=o.optString("payer","Não informado").take(60),createdBy=ownerId,synced=o.optBoolean("synced",false)))
+            } }
             writableDatabase.setTransactionSuccessful()
         } finally { writableDatabase.endTransaction() }
     }
-    fun exportJson(ownerId: String? = null): String {
+    fun exportJson(ownerId: String? = null, activeSpaceId: String? = null): String {
         fun ownedOrSynced(synced: Boolean, createdBy: String?) = ownerId == null || synced || createdBy == ownerId
         val ex=JSONArray(); all().filter { ownedOrSynced(it.synced,it.createdBy) }.forEach { ex.put(JSONObject().put("amount",it.amount).put("category",it.category).put("payer",it.payer).put("description",it.description).put("date",it.date).put("visibility",it.visibility).put("creator_share_amount",it.creatorShareAmount).put("kind",it.kind)) }
         val bills=JSONArray(); recurringBills().filter { ownedOrSynced(it.synced,it.createdBy) }.forEach { bills.put(JSONObject().put("amount",it.amount).put("category",it.category).put("payer",it.payer).put("description",it.description).put("nextDate",it.nextDate).put("frequency",it.frequency).put("isActive",it.isActive).put("visibility",it.visibility)) }
         val goals=JSONArray(); savingsGoals().filter { ownedOrSynced(it.synced,it.createdBy) }.forEach { goals.put(JSONObject().put("name",it.name).put("targetAmount",it.targetAmount).put("savedAmount",it.savedAmount).put("monthlyContribution",it.monthlyContribution).put("targetDate",it.targetDate)) }
-        return JSONObject().put("schemaVersion",4).put("expenses",ex).put("recurringBills",bills).put("savingsGoals",goals).toString()
+        val cycles=JSONArray(); creditCardCycles().filter { (activeSpaceId == null || it.spaceId == activeSpaceId) && (it.synced || it.closedBy == ownerId || it.paidBy == ownerId || (it.closedAt == null && !it.synced)) }.forEach { cycles.put(JSONObject().put("id",it.id).put("spaceId",it.spaceId).put("openedAt",it.openedAt).put("closedAt",it.closedAt).put("statementAmount",it.statementAmount).put("closedBy",it.closedBy).put("paidAt",it.paidAt).put("paidBy",it.paidBy).put("synced",it.synced)) }
+        val purchases=JSONArray(); creditCardPurchases().filter { (activeSpaceId == null || it.spaceId == activeSpaceId) && ownedOrSynced(it.synced,it.createdBy) }.forEach { purchases.put(JSONObject().put("id",it.id).put("spaceId",it.spaceId).put("cycleId",it.cycleId).put("amount",it.amount).put("category",it.category).put("description",it.description).put("purchaseDate",it.purchaseDate).put("payer",it.payer).put("createdBy",it.createdBy).put("synced",it.synced)) }
+        return JSONObject().put("schemaVersion",6).put("expenses",ex).put("recurringBills",bills).put("savingsGoals",goals).put("creditCardCycles",cycles).put("creditCardPurchases",purchases).toString()
     }
+    private fun cycleValues(c:CreditCardCycle)=ContentValues().apply { put("id",c.id); put("space_id",c.spaceId); put("opened_at",c.openedAt); put("closed_at",c.closedAt); put("statement_amount",LocalFieldCrypto.encrypt(c.statementAmount.toString())); put("closed_by",c.closedBy); put("paid_at",c.paidAt); put("paid_by",c.paidBy); put("synced",if(c.synced)1 else 0) }
+    private fun readCycles(sql:String):List<CreditCardCycle> { val out=mutableListOf<CreditCardCycle>(); readableDatabase.rawQuery(sql,null).use { c -> while(c.moveToNext()) out+=CreditCardCycle(c.getString(0),c.getString(1),c.getString(2),if(c.isNull(3))null else c.getString(3),LocalFieldCrypto.decrypt(c.getString(4)).toDouble(),if(c.isNull(5))null else c.getString(5),if(c.isNull(6))null else c.getString(6),if(c.isNull(7))null else c.getString(7),c.getInt(8)!=0) }; return out }
+    private fun purchaseValues(p:CreditCardPurchase)=ContentValues().apply { put("id",p.id); put("space_id",p.spaceId); put("cycle_id",p.cycleId); put("amount",LocalFieldCrypto.encrypt(p.amount.toString())); put("category",LocalFieldCrypto.encrypt(p.category)); put("description",LocalFieldCrypto.encrypt(p.description)); put("purchase_date",p.purchaseDate); put("payer",LocalFieldCrypto.encrypt(p.payer)); put("created_by",p.createdBy); put("synced",if(p.synced)1 else 0) }
+    private fun readPurchases(sql:String):List<CreditCardPurchase> { val out=mutableListOf<CreditCardPurchase>(); readableDatabase.rawQuery(sql,null).use { c -> while(c.moveToNext()) out+=CreditCardPurchase(c.getString(0),c.getString(1),c.getString(2),LocalFieldCrypto.decrypt(c.getString(3)).toDouble(),LocalFieldCrypto.decrypt(c.getString(4)),LocalFieldCrypto.decrypt(c.getString(5)),c.getString(6),LocalFieldCrypto.decrypt(c.getString(7)),if(c.isNull(8))null else c.getString(8),c.getInt(9)!=0) }; return out }
+    private fun CreditCardCycle.withStableCycleId()=if(runCatching{UUID.fromString(id)}.isSuccess)this else copy(id=UUID.randomUUID().toString())
+    private fun CreditCardPurchase.withStablePurchaseId()=if(runCatching{UUID.fromString(id)}.isSuccess)this else copy(id=UUID.randomUUID().toString())
     private fun expenseValues(e:Expense,synced:Boolean)=ContentValues().apply { put("remote_id",e.remoteId); put("amount",LocalFieldCrypto.encrypt(e.amount.toString())); put("category",LocalFieldCrypto.encrypt(e.category)); put("payer",LocalFieldCrypto.encrypt(e.payer)); put("description",LocalFieldCrypto.encrypt(e.description)); put("date",e.date); put("created_by",e.createdBy); put("synced",if(synced)1 else 0); put("visibility",e.visibility); put("creator_share_amount",LocalFieldCrypto.encrypt(e.creatorShareAmount.toString())); put("review_status",e.reviewStatus); put("reviewed_by",e.reviewedBy); put("reviewed_at",e.reviewedAt); put("kind",if(e.kind in setOf(EntryKind.EXPENSE,EntryKind.INCOME)) e.kind else EntryKind.EXPENSE) }
     private fun query(sql:String):List<Expense> { val out=mutableListOf<Expense>(); readableDatabase.rawQuery(sql,null).use { c -> while(c.moveToNext()) out+=Expense(id=c.getLong(0),remoteId=c.getString(1),amount=LocalFieldCrypto.decrypt(c.getString(2)).toDouble(),category=LocalFieldCrypto.decrypt(c.getString(3)),payer=LocalFieldCrypto.decrypt(c.getString(4)),description=LocalFieldCrypto.decrypt(c.getString(5)),date=c.getString(6),createdBy=if(c.isNull(7))null else c.getString(7),synced=c.getInt(8)!=0,visibility=c.getString(9),creatorShareAmount=LocalFieldCrypto.decrypt(c.getString(10)).toDouble(),reviewStatus=c.getString(11),reviewedBy=if(c.isNull(12))null else c.getString(12),reviewedAt=if(c.isNull(13))null else c.getString(13),kind=c.getString(14)) }; return out }
     private fun billValues(b:RecurringBill)=ContentValues().apply { put("id",b.id); put("space_id",b.spaceId); put("amount",LocalFieldCrypto.encrypt(b.amount.toString())); put("category",LocalFieldCrypto.encrypt(b.category)); put("payer",LocalFieldCrypto.encrypt(b.payer)); put("description",LocalFieldCrypto.encrypt(b.description)); put("next_date",b.nextDate); put("frequency",b.frequency); put("is_active",if(b.isActive)1 else 0); put("visibility",b.visibility); put("created_by",b.createdBy); put("synced",if(b.synced)1 else 0) }
@@ -189,7 +236,7 @@ class LocalStore(context: Context) : SQLiteOpenHelper(context, "financas.db", nu
         }
     }
     private fun deleteMissingSynced(table: String, idColumn: String, ids: Set<String>) {
-        require(table in setOf("expenses", "recurring_bills", "savings_goals"))
+        require(table in setOf("expenses", "recurring_bills", "savings_goals", "credit_card_cycles", "credit_card_purchases"))
         require(idColumn in setOf("remote_id", "id"))
         val db = writableDatabase
         if (ids.isEmpty()) {

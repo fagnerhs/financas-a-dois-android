@@ -332,6 +332,8 @@ fun FinanceApp(store: LocalStore, recoveryLinkActive: Boolean = false) {
     var rows by remember { mutableStateOf(emptyList<Expense>()) }
     var bills by remember { mutableStateOf(emptyList<RecurringBill>()) }
     var goals by remember { mutableStateOf(emptyList<SavingsGoal>()) }
+    var cardCycles by remember { mutableStateOf(emptyList<CreditCardCycle>()) }
+    var cardPurchases by remember { mutableStateOf(emptyList<CreditCardPurchase>()) }
     var events by remember { mutableStateOf(emptyList<ExpenseEvent>()) }
     var tab by remember { mutableIntStateOf(0) }
     val paidBillIds = remember { mutableSetOf<String>() }
@@ -368,6 +370,8 @@ fun FinanceApp(store: LocalStore, recoveryLinkActive: Boolean = false) {
     fun visibleExpenses(values: List<Expense>) = values.filter { it.synced || it.createdBy == userId }
     fun visibleBills(values: List<RecurringBill>) = values.filter { it.synced || it.createdBy == userId }
     fun visibleGoals(values: List<SavingsGoal>) = values.filter { it.synced || it.createdBy == userId }
+    fun visibleCardCycles(values: List<CreditCardCycle>) = values
+    fun visibleCardPurchases(values: List<CreditCardPurchase>) = values.filter { it.synced || it.createdBy == userId }
 
     LaunchedEffect(recoveryLinkActive) {
         if (recoveryLinkActive) recoveryMode = true
@@ -380,7 +384,7 @@ fun FinanceApp(store: LocalStore, recoveryLinkActive: Boolean = false) {
         if (previousOwner == null) withContext(Dispatchers.IO) { store.claimLegacyPending(uid) }
         if (!sameAccount) {
             withContext(Dispatchers.IO) { store.clearSyncedCache() }
-            rows = emptyList(); bills = emptyList(); goals = emptyList(); events = emptyList()
+            rows = emptyList(); bills = emptyList(); goals = emptyList(); cardCycles = emptyList(); cardPurchases = emptyList(); events = emptyList()
             budgetText = ""; emergencyGoal = "10000"; emergencySaved = "0"; monthlyContribution = "500"
             forecastBalance = "0"; forecastAsOf = LocalDate.now().toString(); forecastPayday = LocalDate.now().plusDays(14).toString(); monthlyIncome = "0"
             prefs.edit().putBoolean("settings_dirty", false).putSecureString("limits", "").putSecureString("goal", emergencyGoal).putSecureString("saved", emergencySaved).putSecureString("monthly", monthlyContribution).putSecureString("forecast_balance", forecastBalance).putSecureString("forecast_as_of", forecastAsOf).putSecureString("forecast_payday", forecastPayday).putSecureString("monthly_income", monthlyIncome).apply()
@@ -421,8 +425,24 @@ fun FinanceApp(store: LocalStore, recoveryLinkActive: Boolean = false) {
                     rows = visibleExpenses(store.all())
                     bills = visibleBills(store.recurringBills())
                     goals = visibleGoals(store.savingsGoals())
-                } else { rows = emptyList(); bills = emptyList(); goals = emptyList() }
+                    cardCycles = visibleCardCycles(store.creditCardCycles().filter { it.spaceId == loaded.id })
+                    cardPurchases = visibleCardPurchases(store.creditCardPurchases().filter { it.spaceId == loaded.id })
+                } else { rows = emptyList(); bills = emptyList(); goals = emptyList(); cardCycles = emptyList(); cardPurchases = emptyList() }
                 bills.forEach { LocalBillReminderWorker.schedule(context, it) }
+            }
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    val open = SupabaseCloud.ensureOpenCreditCardCycle(loaded.id)
+                    store.upsertRemoteCreditCardCycle(open.toLocal())
+                    val remoteCycles = SupabaseCloud.fetchCreditCardCycles(loaded.id)
+                    store.reconcileCreditCardCycles(remoteCycles.map { it.id }.toSet())
+                    remoteCycles.forEach { store.upsertRemoteCreditCardCycle(it.toLocal()) }
+                    val remotePurchases = SupabaseCloud.fetchCreditCardPurchases(loaded.id)
+                    store.reconcileCreditCardPurchases(remotePurchases.map { it.id }.toSet())
+                    remotePurchases.forEach { store.upsertRemoteCreditCardPurchase(it.toLocal()) }
+                    cardCycles = visibleCardCycles(store.creditCardCycles().filter { it.spaceId == loaded.id })
+                    cardPurchases = visibleCardPurchases(store.creditCardPurchases().filter { it.spaceId == loaded.id })
+                }
             }
         }
     }
@@ -483,6 +503,28 @@ fun FinanceApp(store: LocalStore, recoveryLinkActive: Boolean = false) {
                 syncNotice = "Conexão instável · dados salvos neste aparelho"
             }
         }
+        val cardCycleRealtime = launch {
+            try {
+                SupabaseCloud.observeCreditCardCycles(currentSpaceId).collect { cloudRows ->
+                    withContext(Dispatchers.IO) {
+                        store.reconcileCreditCardCycles(cloudRows.map { it.id }.toSet())
+                        cloudRows.forEach { store.upsertRemoteCreditCardCycle(it.toLocal()) }
+                        cardCycles = visibleCardCycles(store.creditCardCycles().filter { it.spaceId == currentSpaceId })
+                    }
+                }
+            } catch (_: Exception) { /* periodic sync below remains the fallback */ }
+        }
+        val cardPurchaseRealtime = launch {
+            try {
+                SupabaseCloud.observeCreditCardPurchases(currentSpaceId).collect { cloudRows ->
+                    withContext(Dispatchers.IO) {
+                        store.reconcileCreditCardPurchases(cloudRows.map { it.id }.toSet())
+                        cloudRows.forEach { store.upsertRemoteCreditCardPurchase(it.toLocal()) }
+                        cardPurchases = visibleCardPurchases(store.creditCardPurchases().filter { it.spaceId == currentSpaceId })
+                    }
+                }
+            } catch (_: Exception) { /* periodic sync below remains the fallback */ }
+        }
         while (isActive) {
             try {
                 val updatedSpace = withContext(Dispatchers.IO) { SupabaseCloud.findMySpace(currentUserId) }
@@ -514,6 +556,7 @@ fun FinanceApp(store: LocalStore, recoveryLinkActive: Boolean = false) {
                 }
                 withContext(Dispatchers.IO) {
                     SupabaseCloud.uploadPending(currentSpaceId, currentUserId, store)
+                    SupabaseCloud.syncPendingCreditCardData(currentSpaceId, currentUserId, store)
                     val visible = SupabaseCloud.fetchExpenses(currentSpaceId)
                     store.reconcileVisibleExpenses(visible.map { it.id }.toSet())
                     visible.forEach { store.upsertRemote(it.toLocal()) }
@@ -525,10 +568,18 @@ fun FinanceApp(store: LocalStore, recoveryLinkActive: Boolean = false) {
                     remoteGoals.forEach { store.upsertRemoteSavingsGoal(it.toLocal()) }
                     SupabaseCloud.uploadPendingRecurringBills(currentSpaceId, currentUserId, store)
                     SupabaseCloud.uploadPendingSavingsGoals(currentSpaceId, currentUserId, store)
+                    val remoteCardCycles = SupabaseCloud.fetchCreditCardCycles(currentSpaceId)
+                    store.reconcileCreditCardCycles(remoteCardCycles.map { it.id }.toSet())
+                    remoteCardCycles.forEach { store.upsertRemoteCreditCardCycle(it.toLocal()) }
+                    val remoteCardPurchases = SupabaseCloud.fetchCreditCardPurchases(currentSpaceId)
+                    store.reconcileCreditCardPurchases(remoteCardPurchases.map { it.id }.toSet())
+                    remoteCardPurchases.forEach { store.upsertRemoteCreditCardPurchase(it.toLocal()) }
                     val remoteEvents = SupabaseCloud.fetchExpenseEvents(currentSpaceId).map { it.toLocal() }
                     events = store.expenseEvents(remoteEvents)
                 }
                 rows = withContext(Dispatchers.IO) { visibleExpenses(store.all()) + SupabaseCloud.fetchExpenseBalances(currentSpaceId).map { b -> Expense(b.amount, "Despesa compartilhada", "", "Despesa (somente valor e data)", b.expenseDate, remoteId="balance:${b.expenseId}", createdBy=b.createdBy, synced=true, visibility="balances_only") } }
+                cardCycles = withContext(Dispatchers.IO) { visibleCardCycles(store.creditCardCycles().filter { it.spaceId == currentSpaceId }) }
+                cardPurchases = withContext(Dispatchers.IO) { visibleCardPurchases(store.creditCardPurchases().filter { it.spaceId == currentSpaceId }) }
                 val refreshedBills = withContext(Dispatchers.IO) { visibleBills(store.recurringBills()) }
                 if (refreshedBills != bills) refreshedBills.forEach { LocalBillReminderWorker.schedule(context, it) }
                 bills = refreshedBills
@@ -540,6 +591,8 @@ fun FinanceApp(store: LocalStore, recoveryLinkActive: Boolean = false) {
             delay(60_000)
         }
         realtime.cancel()
+        cardCycleRealtime.cancel()
+        cardPurchaseRealtime.cancel()
     }
 
     if (checkingSession) {
@@ -816,10 +869,60 @@ fun FinanceApp(store: LocalStore, recoveryLinkActive: Boolean = false) {
                         }
                     }
                 )
-                2 -> InsightsScreen(expenses = rows, recurringBills = bills, budgets = budgets, goal = emergencyGoal.toMoneyOrZero(), saved = emergencySaved.toMoneyOrZero(), monthlyContribution = monthlyContribution.toMoneyOrZero(), forecastBalanceText = forecastBalance, onForecastBalance = { forecastBalance = it }, forecastSnapshotText = forecastAsOf, onForecastSnapshot = { forecastAsOf = it }, forecastPaydayText = forecastPayday, onForecastPayday = { forecastPayday = it }, monthlyIncome = monthlyIncome, onMonthlyIncome = { monthlyIncome = it }, onAddReserveContribution = { amount -> addReserveContribution(amount) })
+                2 -> InsightsScreen(expenses = rows, recurringBills = bills, creditCardCycles = cardCycles, cardPurchases = cardPurchases, budgets = budgets, goal = emergencyGoal.toMoneyOrZero(), saved = emergencySaved.toMoneyOrZero(), monthlyContribution = monthlyContribution.toMoneyOrZero(), forecastBalanceText = forecastBalance, onForecastBalance = { forecastBalance = it }, forecastSnapshotText = forecastAsOf, onForecastSnapshot = { forecastAsOf = it }, forecastPaydayText = forecastPayday, onForecastPayday = { forecastPayday = it }, monthlyIncome = monthlyIncome, onMonthlyIncome = { monthlyIncome = it }, onAddReserveContribution = { amount -> addReserveContribution(amount) })
                 3 -> PlanningScreen(
                     bills = bills, goals = goals,
+                    cardCycles = cardCycles, cardPurchases = cardPurchases, currentUserId = userId,
+                    currentUserName = currentSpace.members.firstOrNull { it.userId == userId }?.displayName.orEmpty().ifBlank { "Eu" },
                     forecastLabel = "Projeção manual: saldo informado em $forecastAsOf; recebimento previsto para $forecastPayday. Renda mensal informada de ${currency(monthlyIncome.toMoneyOrZero())} não é somada antes do recebimento.",
+                    onAddCardPurchase = { purchase -> scope.launch {
+                        val savedPurchase = withContext(Dispatchers.IO) { store.addCreditCardPurchase(purchase.copy(spaceId=currentSpace.id,createdBy=userId,synced=false)) }
+                        cardPurchases = visibleCardPurchases(store.creditCardPurchases().filter { it.spaceId == currentSpace.id })
+                        try {
+                            withContext(Dispatchers.IO) {
+                                SupabaseCloud.syncPendingCreditCardData(currentSpace.id,userId ?: return@withContext,store)
+                                val remote = SupabaseCloud.fetchCreditCardPurchases(currentSpace.id)
+                                store.reconcileCreditCardPurchases(remote.map { it.id }.toSet())
+                                remote.forEach { store.upsertRemoteCreditCardPurchase(it.toLocal()) }
+                            }
+                            cardPurchases = visibleCardPurchases(store.creditCardPurchases().filter { it.spaceId == currentSpace.id })
+                            notice = "Compra adicionada à fatura compartilhada."
+                        } catch (_: Exception) { notice = "Compra salva neste aparelho; será sincronizada quando houver conexão." }
+                    } },
+                    onCloseCardCycle = { cycle -> scope.launch {
+                        val now = java.time.Instant.now().toString()
+                        val nextId = nextCreditCardCycleId(currentSpace.id,cycle.id)
+                        val localPurchases = store.creditCardPurchases().filter { it.cycleId == cycle.id && it.spaceId == currentSpace.id }
+                        val localTotal = localPurchases.sumOf { java.math.BigDecimal.valueOf(it.amount).setScale(2, java.math.RoundingMode.HALF_UP).toDouble() }
+                        val closedLocally = cycle.copy(closedAt=now,closedBy=userId,statementAmount=localTotal,synced=false)
+                        val nextLocally = CreditCardCycle(id=nextId,spaceId=currentSpace.id,openedAt=now,synced=false)
+                        withContext(Dispatchers.IO) { store.addCreditCardCycle(closedLocally); store.addCreditCardCycle(nextLocally) }
+                        cardCycles = visibleCardCycles(store.creditCardCycles().filter { it.spaceId == currentSpace.id })
+                        try {
+                            withContext(Dispatchers.IO) {
+                                val uid = userId ?: throw IllegalStateException("Conta não autenticada")
+                                SupabaseCloud.syncPendingCreditCardData(currentSpace.id,uid,store)
+                            }
+                            cardCycles = visibleCardCycles(store.creditCardCycles().filter { it.spaceId == currentSpace.id })
+                            cardPurchases = visibleCardPurchases(store.creditCardPurchases().filter { it.spaceId == currentSpace.id })
+                            notice = "Fatura fechada e novo ciclo iniciado. A previsão manual só será reduzida quando registrarem o pagamento."
+                        } catch (_: Exception) { notice = "Fatura fechada neste aparelho e novo ciclo aberto. A sincronização será tentada quando houver internet; confirmem se os dois aparelhos enviaram as compras antes de fechar." }
+                    } },
+                    onPayCardCycle = { cycle -> scope.launch {
+                        val paidLocally = cycle.copy(paidAt=java.time.Instant.now().toString(),paidBy=userId,synced=false)
+                        withContext(Dispatchers.IO) { store.addCreditCardCycle(paidLocally) }
+                        cardCycles = visibleCardCycles(store.creditCardCycles().filter { it.spaceId == currentSpace.id })
+                        try {
+                            val remote = withContext(Dispatchers.IO) {
+                                val uid = userId ?: throw IllegalStateException("Conta não autenticada")
+                                SupabaseCloud.syncPendingCreditCardData(currentSpace.id,uid,store)
+                                SupabaseCloud.fetchCreditCardCycles(currentSpace.id).firstOrNull { it.id == cycle.id } ?: throw IllegalStateException("Fatura não encontrada")
+                            }
+                            withContext(Dispatchers.IO) { store.upsertRemoteCreditCardCycle(remote.toLocal(),force=true) }
+                            cardCycles = visibleCardCycles(store.creditCardCycles().filter { it.spaceId == currentSpace.id })
+                            notice = "Pagamento integral registrado. ${currency(cycle.statementAmount)} será abatido uma única vez da previsão manual, desde que tenha ocorrido após a data do saldo informado."
+                        } catch (_: Exception) { notice = "Pagamento registrado neste aparelho e já considerado na previsão. Será sincronizado quando houver conexão, se posterior à data do saldo informado." }
+                    } },
                     onSaveBill = { edited -> scope.launch {
                         val saved = withContext(Dispatchers.IO) { store.addRecurringBill(edited.copy(spaceId=currentSpace.id, createdBy=userId, synced=false)) }
                         bills = withContext(Dispatchers.IO) { visibleBills(store.recurringBills()) }
@@ -874,18 +977,20 @@ fun FinanceApp(store: LocalStore, recoveryLinkActive: Boolean = false) {
                     },
                     onExport = {
                         val owner = userId ?: throw IllegalStateException("Conta não autenticada")
-                        withContext(Dispatchers.IO) { store.exportJson(owner) }
+                        withContext(Dispatchers.IO) { store.exportJson(owner,currentSpace.id) }
                     },
                     onImport = { raw ->
                         try {
-                            withContext(Dispatchers.IO) { store.importJson(raw,userId) }
+                            withContext(Dispatchers.IO) { store.importJson(raw,userId,currentSpace.id) }
                             rows = withContext(Dispatchers.IO) { visibleExpenses(store.all()) }
                             bills = withContext(Dispatchers.IO) { visibleBills(store.recurringBills()) }
                             goals = withContext(Dispatchers.IO) { visibleGoals(store.savingsGoals()) }
+                            cardCycles = visibleCardCycles(store.creditCardCycles().filter { it.spaceId == currentSpace.id })
+                            cardPurchases = visibleCardPurchases(store.creditCardPurchases().filter { it.spaceId == currentSpace.id })
                             bills.forEach { LocalBillReminderWorker.schedule(context, it) }
                             notice = "Importação concluída. Os registros serão sincronizados."
                             val uid = userId
-                            if (uid != null) runCatching { withContext(Dispatchers.IO) { SupabaseCloud.uploadPending(currentSpace.id, uid, store); SupabaseCloud.uploadPendingRecurringBills(currentSpace.id,uid,store); SupabaseCloud.uploadPendingSavingsGoals(currentSpace.id,uid,store) } }
+                            if (uid != null) runCatching { withContext(Dispatchers.IO) { SupabaseCloud.uploadPending(currentSpace.id, uid, store); SupabaseCloud.uploadPendingRecurringBills(currentSpace.id,uid,store); SupabaseCloud.uploadPendingSavingsGoals(currentSpace.id,uid,store); SupabaseCloud.syncPendingCreditCardData(currentSpace.id,uid,store) } }
                             rows = withContext(Dispatchers.IO) { visibleExpenses(store.all()) }
                             bills = withContext(Dispatchers.IO) { visibleBills(store.recurringBills()) }
                             goals = withContext(Dispatchers.IO) { visibleGoals(store.savingsGoals()) }
@@ -911,7 +1016,7 @@ fun FinanceApp(store: LocalStore, recoveryLinkActive: Boolean = false) {
                         scope.launch {
                             try {
                                 SupabaseCloud.signOutEverywhere()
-                                userId = null; userEmail = null; space = null; rows = emptyList(); bills = emptyList(); goals = emptyList(); events = emptyList()
+                                userId = null; userEmail = null; space = null; rows = emptyList(); bills = emptyList(); goals = emptyList(); cardCycles = emptyList(); cardPurchases = emptyList(); events = emptyList()
                                 notice = "Sessões encerradas em todos os dispositivos."
                             } catch (_: Exception) {
                                 notice = "Não foi possível revogar sessões remotamente (possível falta de conexão). Você ainda pode sair apenas deste aparelho."
@@ -924,7 +1029,7 @@ fun FinanceApp(store: LocalStore, recoveryLinkActive: Boolean = false) {
                             userId = null
                             userEmail = null
                             space = null
-                            rows = emptyList(); bills = emptyList(); goals = emptyList(); events = emptyList()
+                            rows = emptyList(); bills = emptyList(); goals = emptyList(); cardCycles = emptyList(); cardPurchases = emptyList(); events = emptyList()
                             notice = ""
                         }
                     }
@@ -1234,26 +1339,31 @@ private fun RegisterScreen(names: List<String>, currentUserId: String?, notice: 
 }
 
 @Composable
-private fun InsightsScreen(expenses: List<Expense>, recurringBills: List<RecurringBill>, budgets: Map<String, Double>, goal: Double, saved: Double, monthlyContribution: Double, forecastBalanceText: String, onForecastBalance: (String) -> Unit, forecastSnapshotText: String, onForecastSnapshot: (String) -> Unit, forecastPaydayText: String, onForecastPayday: (String) -> Unit, monthlyIncome: String, onMonthlyIncome: (String) -> Unit, onAddReserveContribution: (Double) -> Unit) {
+private fun InsightsScreen(expenses: List<Expense>, recurringBills: List<RecurringBill>, creditCardCycles: List<CreditCardCycle>, cardPurchases: List<CreditCardPurchase>, budgets: Map<String, Double>, goal: Double, saved: Double, monthlyContribution: Double, forecastBalanceText: String, onForecastBalance: (String) -> Unit, forecastSnapshotText: String, onForecastSnapshot: (String) -> Unit, forecastPaydayText: String, onForecastPayday: (String) -> Unit, monthlyIncome: String, onMonthlyIncome: (String) -> Unit, onAddReserveContribution: (Double) -> Unit) {
     val currentMonth = YearMonth.now().toString()
     var reserveContributionText by remember { mutableStateOf("") }
     var reserveFeedback by remember { mutableStateOf("") }
     val monthRows = expenses.filter { it.date.startsWith(currentMonth) && it.visibility != "private" }
     val monthlyExpenses = monthRows.filter { it.kind == EntryKind.EXPENSE && (it.visibility == "shared" || it.visibility == "balances_only") }
-    val grouped = monthlyExpenses.filter { it.visibility == "shared" }.groupBy { it.category }.mapValues { entry -> entry.value.sumOf(Expense::amount) }.toList().sortedByDescending { it.second }
+    val monthCardPurchases = cardPurchases.filter { it.purchaseDate.startsWith(currentMonth) }
+    val analysisExpenses = monthlyExpenses.filter { it.visibility == "shared" } + monthCardPurchases.map { Expense(it.amount,it.category,it.payer,it.description,it.purchaseDate) }
+    val grouped = analysisExpenses.groupBy { it.category }.mapValues { entry -> entry.value.sumOf(Expense::amount) }.toList().sortedByDescending { it.second }
     val monthlySummary = summarizeMonthlyEntries(expenses, currentMonth)
     val total = monthlySummary.expenses
+    val cardTotal = monthCardPurchases.sumOf { it.amount }
+    val consumptionTotal = total + cardTotal
     val incomeTotal = monthlySummary.income
     val monthsToGoal = if (goal <= saved) 0 else if (monthlyContribution > 0) kotlin.math.ceil((goal - saved) / monthlyContribution).toInt() else null
-    val savingOpportunities = remember(expenses, budgets, currentMonth) { analyzeSavingsOpportunities(expenses, budgets, currentMonth) }
+    val savingOpportunities = remember(expenses, cardPurchases, budgets, currentMonth) { analyzeSavingsOpportunities(expenses + cardPurchases.map { Expense(it.amount,it.category,it.payer,it.description,it.purchaseDate) }, budgets, currentMonth) }
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Text("Insights", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = Ink)
         Text("Uma leitura simples do mês de vocês.", color = Muted)
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             MetricCard("Entradas", currency(incomeTotal), "compartilhadas neste mês", Modifier.weight(1f))
-            MetricCard("Despesas", currency(total), "compartilhadas neste mês", Modifier.weight(1f))
+            MetricCard("Despesas", currency(total), "lançamentos no mês", Modifier.weight(1f))
         }
-        MetricCard("Saldo do mês", currency(incomeTotal - total), "entradas menos despesas", Modifier.fillMaxWidth())
+        MetricCard("Compras no cartão", currency(cardTotal), "consumo deste mês · sem duplicar o pagamento", Modifier.fillMaxWidth())
+        MetricCard("Saldo do mês", currency(incomeTotal - total), "entradas menos despesas registradas; cartão fica separado até o pagamento", Modifier.fillMaxWidth())
         SectionTitle("Sugestões para economizar", "análise automática feita no aparelho")
         if (savingOpportunities.isEmpty()) {
             EmptyCard("Ainda não há sugestões", "Quando houver despesas compartilhadas categorizadas neste mês, mostraremos a maior categoria e os limites ultrapassados.")
@@ -1274,10 +1384,10 @@ private fun InsightsScreen(expenses: List<Expense>, recurringBills: List<Recurri
             }
         }
         Text("Importante: esta versão ainda não integra uma IA generativa. As sugestões usam regras locais, consideram apenas despesas compartilhadas com categoria visível e não enviam lançamentos a modelos externos.", color = Muted, style = MaterialTheme.typography.bodySmall)
-        SectionTitle("Onde o dinheiro está indo", "categorias ordenadas por valor")
-        if (grouped.isEmpty()) EmptyCard("Ainda sem dados do mês", "Os insights aparecem assim que vocês começarem a registrar despesas.")
+        SectionTitle("Onde o dinheiro está indo", "despesas e compras no cartão por categoria")
+        if (grouped.isEmpty()) EmptyCard("Ainda sem dados do mês", "Os insights aparecem assim que vocês começarem a registrar despesas ou compras no cartão.")
         grouped.forEachIndexed { index, (category, amount) ->
-            val share = if (total > 0) (amount / total).toFloat().coerceIn(0f, 1f) else 0f
+            val share = if (consumptionTotal > 0) (amount / consumptionTotal).toFloat().coerceIn(0f, 1f) else 0f
             Card(colors = CardDefaults.cardColors(containerColor = Color.White), shape = RoundedCornerShape(18.dp)) {
                 Column(Modifier.padding(14.dp)) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -1286,7 +1396,7 @@ private fun InsightsScreen(expenses: List<Expense>, recurringBills: List<Recurri
                     }
                     Spacer(Modifier.height(8.dp))
                     LinearProgressIndicator(progress = { share }, modifier = Modifier.fillMaxWidth().height(7.dp).clip(CircleShape), color = Forest, trackColor = Color(0xFFE8EEEA))
-                    Text("${(share * 100).toInt()}% do total do mês", style = MaterialTheme.typography.labelSmall, color = Muted)
+                    Text("${(share * 100).toInt()}% do consumo registrado no mês", style = MaterialTheme.typography.labelSmall, color = Muted)
                 }
             }
         }
@@ -1329,15 +1439,15 @@ private fun InsightsScreen(expenses: List<Expense>, recurringBills: List<Recurri
             }
         }
         SectionTitle("Previsão até o próximo recebimento", "projeção manual; não é saldo bancário")
-        OutlinedTextField(forecastBalanceText, onForecastBalance, Modifier.fillMaxWidth(), label = { Text("Saldo informado no snapshot (R$)") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
+        OutlinedTextField(forecastBalanceText, onForecastBalance, Modifier.fillMaxWidth(), label = { Text("Saldo manual de referência (R$)") }, supportingText = { Text("Informe um saldo já conhecido. Pagamentos de fatura posteriores à data de referência serão abatidos; compras não entram antes do pagamento.") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
         OutlinedTextField(forecastSnapshotText, onForecastSnapshot, Modifier.fillMaxWidth(), label = { Text("Data de referência (AAAA-MM-DD)") }, singleLine = true)
         OutlinedTextField(forecastPaydayText, onForecastPayday, Modifier.fillMaxWidth(), label = { Text("Próxima data de recebimento") }, singleLine = true)
         OutlinedTextField(monthlyIncome, onMonthlyIncome, Modifier.fillMaxWidth(), label = { Text("Renda mensal prevista (R$; valor manual)") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
-        val forecast = runCatching { calculateCashForecast(forecastBalanceText.toMoneyOrZero(), LocalDate.parse(forecastSnapshotText), LocalDate.now(), LocalDate.parse(forecastPaydayText), expenses, recurringBills) }.getOrNull()
+        val forecast = runCatching { calculateCashForecast(forecastBalanceText.toMoneyOrZero(), LocalDate.parse(forecastSnapshotText), LocalDate.now(), LocalDate.parse(forecastPaydayText), expenses, recurringBills, creditCardCycles) }.getOrNull()
         Card(colors = CardDefaults.cardColors(containerColor = Mint), shape = RoundedCornerShape(18.dp)) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(if (forecast == null) "Informe saldo e datas ISO válidas; recebimento deve ser hoje ou futuro." else "Estimativa para $forecastPaydayText: ${currency(forecast.remaining)}", fontWeight = FontWeight.Bold, color = ForestDark)
-                if (forecast != null) Text("Parte do saldo informado na data $forecastSnapshotText; subtrai despesas compartilhadas/somente-saldo após essa referência (${currency(forecast.includedExpenses)}) e recorrências compartilhadas cadastradas entre hoje e o recebimento (${currency(forecast.includedRecurring)}). A renda mensal prevista (${currency(monthlyIncome.toMoneyOrZero())}) não é adicionada antes da data de recebimento. Itens não cadastrados não entram.", color = ForestDark, style = MaterialTheme.typography.bodySmall)
+                if (forecast != null) Text("Parte do saldo informado na data $forecastSnapshotText; subtrai despesas compartilhadas/somente-saldo após essa referência (${currency(forecast.includedExpenses)}), recorrências compartilhadas (${currency(forecast.includedRecurring)}) e faturas pagas depois da data do saldo (${currency(forecast.includedCardPayments)}). Compras no cartão não são descontadas antes do pagamento. A renda mensal prevista (${currency(monthlyIncome.toMoneyOrZero())}) não é adicionada antes da data de recebimento. Itens não cadastrados não entram.", color = ForestDark, style = MaterialTheme.typography.bodySmall)
                 Text("Usa somente dados informados aqui; não consulta bancos e não é saldo bancário real.", color = Muted, style = MaterialTheme.typography.bodySmall)
             }
         }

@@ -2,6 +2,7 @@ package br.com.financasdocasal
 
 import java.time.LocalDate
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Test
 
 class ForecastTest {
@@ -47,5 +48,30 @@ class ForecastTest {
         )
         val result = calculateCashForecast(500.0, snapshot, today, payday, emptyList(), bills)
         assertEquals(105.0, result.includedRecurring, 0.001)
+    }
+
+    @Test fun closingCardStatementDoesNotReduceCashUntilPaid() {
+        val closed = CreditCardCycle(id="cycle-1", spaceId="space", openedAt="2026-10-01T00:00:00Z", closedAt="2026-10-20T00:00:00Z", statementAmount=240.0)
+        val result = calculateCashForecast(1000.0, snapshot, today, payday, emptyList(), emptyList(), listOf(closed))
+        assertEquals(1000.0, result.remaining, 0.001)
+        assertEquals(0.0, result.includedCardPayments, 0.001)
+    }
+
+    @Test fun paidStatementReducesCashOnceOnlyAfterSnapshotAndWithinPayday() {
+        val cycles = listOf(
+            CreditCardCycle(id="after", spaceId="space", openedAt="2026-10-01T00:00:00Z", closedAt="2026-10-20T00:00:00Z", statementAmount=240.0, paidAt="2026-10-21T12:00:00Z"),
+            CreditCardCycle(id="before", spaceId="space", openedAt="2026-09-01T00:00:00Z", closedAt="2026-10-01T00:00:00Z", statementAmount=80.0, paidAt="2026-10-01T18:00:00Z"),
+            CreditCardCycle(id="after-payday", spaceId="space", openedAt="2026-10-01T00:00:00Z", closedAt="2026-11-01T00:00:00Z", statementAmount=90.0, paidAt="2026-11-11T12:00:00Z")
+        )
+        val result = calculateCashForecast(1000.0, snapshot, today, payday, emptyList(), emptyList(), cycles)
+        assertEquals(240.0, result.includedCardPayments, 0.001)
+        assertEquals(760.0, result.remaining, 0.001)
+    }
+
+    @Test fun nextCreditCardCycleIdIsStableForRetryAndScopedByCycle() {
+        val first = nextCreditCardCycleId("space-a", "cycle-1")
+        assertEquals(first, nextCreditCardCycleId("space-a", "cycle-1"))
+        assertNotEquals(first, nextCreditCardCycleId("space-b", "cycle-1"))
+        assertNotEquals(first, nextCreditCardCycleId("space-a", "cycle-2"))
     }
 }

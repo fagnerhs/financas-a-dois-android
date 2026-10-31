@@ -62,6 +62,40 @@ object SupabaseCloud {
     suspend fun upsertSavingsGoal(spaceId:String,userId:String,goal:SavingsGoal) { client.postgrest.rpc("save_savings_goal",SaveSavingsGoalArgs(goal.id,spaceId,goal.name,goal.targetAmount,goal.savedAmount,goal.monthlyContribution,goal.targetDate)).decodeAs<String>() }
     suspend fun deleteSavingsGoal(spaceId:String,id:String) { client.from("savings_goals").delete { filter { eq("id",id); eq("space_id",spaceId) } } }
     suspend fun uploadPendingSavingsGoals(spaceId:String,userId:String,store:LocalStore):Int { var n=0; store.pendingSavingsGoals().filter { it.createdBy == userId }.forEach { upsertSavingsGoal(spaceId,userId,it); store.markSavingsGoalSynced(it.id); n++ }; return n }
+    suspend fun ensureOpenCreditCardCycle(spaceId:String):CreditCardCycleDto = client.postgrest.rpc("ensure_open_credit_card_cycle",EnsureCreditCardCycleArgs(spaceId)).decodeAs<CreditCardCycleDto>()
+    suspend fun fetchCreditCardCycles(spaceId:String):List<CreditCardCycleDto> = client.from("credit_card_cycles").select { filter { eq("space_id",spaceId) } }.decodeList()
+    @OptIn(SupabaseExperimental::class) fun observeCreditCardCycles(spaceId:String):Flow<List<CreditCardCycleDto>> = client.from("credit_card_cycles").selectAsFlow(CreditCardCycleDto::id) { eq("space_id",spaceId) }
+    suspend fun closeCreditCardCycle(spaceId:String,cycleId:String,nextCycleId:String):CloseCreditCardCycleDto = client.postgrest.rpc("close_credit_card_cycle",CloseCreditCardCycleArgs(spaceId,cycleId,nextCycleId)).decodeAs<CloseCreditCardCycleDto>()
+    suspend fun payCreditCardCycle(spaceId:String,cycleId:String):CreditCardCycleDto = client.postgrest.rpc("pay_credit_card_cycle",PayCreditCardCycleArgs(spaceId,cycleId)).decodeAs<CreditCardCycleDto>()
+    suspend fun fetchCreditCardPurchases(spaceId:String):List<CreditCardPurchaseDto> = client.from("credit_card_purchases").select { filter { eq("space_id",spaceId) } }.decodeList()
+    @OptIn(SupabaseExperimental::class) fun observeCreditCardPurchases(spaceId:String):Flow<List<CreditCardPurchaseDto>> = client.from("credit_card_purchases").selectAsFlow(CreditCardPurchaseDto::id) { eq("space_id",spaceId) }
+    suspend fun upsertCreditCardPurchase(spaceId:String,userId:String,purchase:CreditCardPurchase) { client.from("credit_card_purchases").upsert(purchase.toDto(spaceId,userId)) }
+    suspend fun uploadPendingCreditCardPurchases(spaceId:String,userId:String,store:LocalStore,cycleId:String?=null):Int {
+        var uploaded=0
+        store.pendingCreditCardPurchases().filter { it.spaceId == spaceId && it.createdBy == userId && (cycleId == null || it.cycleId == cycleId) }.forEach { purchase -> upsertCreditCardPurchase(spaceId,userId,purchase); store.markCreditCardPurchaseSynced(purchase.id); uploaded++ }
+        return uploaded
+    }
+    suspend fun syncPendingCreditCardData(spaceId:String,userId:String,store:LocalStore):Int {
+        var synced=0
+        val pendingCycles=store.pendingCreditCardCycles().filter { it.spaceId == spaceId && it.closedAt != null }.sortedBy { it.openedAt }
+        pendingCycles.forEach { cycle ->
+            uploadPendingCreditCardPurchases(spaceId,userId,store,cycle.id)
+            if (cycle.closedAt != null) {
+                val nextId=nextCreditCardCycleId(spaceId,cycle.id)
+                val closed=closeCreditCardCycle(spaceId,cycle.id,nextId)
+                if (cycle.paidAt == null) store.upsertRemoteCreditCardCycle(closed.closedCycle.toLocal(),force=true)
+                store.upsertRemoteCreditCardCycle(closed.openCycle.toLocal(),force=true)
+                synced++
+            }
+            if (cycle.paidAt != null) {
+                val saved=payCreditCardCycle(spaceId,cycle.id)
+                store.upsertRemoteCreditCardCycle(saved.toLocal(),force=true)
+                synced++
+            }
+        }
+        synced += uploadPendingCreditCardPurchases(spaceId,userId,store)
+        return synced
+    }
     suspend fun fetchExpenseEvents(spaceId:String):List<ExpenseEventDto> = client.from("expense_events").select { filter { eq("space_id",spaceId) } }.decodeList()
     @OptIn(SupabaseExperimental::class) fun observeExpenseEvents(spaceId:String):Flow<List<ExpenseEventDto>> = client.from("expense_events").selectAsFlow(ExpenseEventDto::id) { eq("space_id",spaceId) }
     suspend fun fetchBudgets(spaceId:String):Map<String,Double> = client.from("category_budgets").select { filter { eq("space_id",spaceId) } }.decodeList<BudgetDto>().associate { it.category to it.monthlyLimit }
@@ -108,3 +142,17 @@ private fun SavingsGoal.toDto(space:String,user:String)=SavingsGoalDto(id,space,
 @Serializable data class MarkExpenseReviewedArgs(@SerialName("p_expense_id") val expenseId:String,@SerialName("p_space_id") val spaceId:String)
 @Serializable data class BudgetDto(@SerialName("space_id") val spaceId:String,val category:String,@SerialName("monthly_limit") val monthlyLimit:Double)
 @Serializable data class CoupleSettingsDto(@SerialName("space_id") val spaceId:String,@SerialName("emergency_goal") val emergencyGoal:Double,@SerialName("emergency_saved") val emergencySaved:Double,@SerialName("monthly_contribution") val monthlyContribution:Double,@SerialName("monthly_income") val monthlyIncome:Double=0.0,@SerialName("available_balance") val availableBalance:Double=0.0,@SerialName("balance_as_of") val balanceAsOf:String="",@SerialName("next_payday") val nextPayday:String?=null)
+@Serializable data class EnsureCreditCardCycleArgs(@SerialName("p_space_id") val spaceId:String)
+@Serializable data class CloseCreditCardCycleArgs(@SerialName("p_space_id") val spaceId:String,@SerialName("p_cycle_id") val cycleId:String,@SerialName("p_next_cycle_id") val nextCycleId:String)
+@Serializable data class PayCreditCardCycleArgs(@SerialName("p_space_id") val spaceId:String,@SerialName("p_cycle_id") val cycleId:String)
+@Serializable data class CreditCardCycleDto(
+    val id:String,@SerialName("space_id") val spaceId:String,@SerialName("opened_at") val openedAt:String,
+    @SerialName("closed_at") val closedAt:String?=null,@SerialName("statement_total") val statementAmount:Double=0.0,
+    @SerialName("closed_by") val closedBy:String?=null,@SerialName("paid_at") val paidAt:String?=null,@SerialName("paid_by") val paidBy:String?=null
+) { fun toLocal()=CreditCardCycle(id,spaceId,openedAt,closedAt,statementAmount,closedBy,paidAt,paidBy,true) }
+@Serializable data class CloseCreditCardCycleDto(@SerialName("closed_cycle") val closedCycle:CreditCardCycleDto,@SerialName("open_cycle") val openCycle:CreditCardCycleDto)
+@Serializable data class CreditCardPurchaseDto(
+    val id:String,@SerialName("space_id") val spaceId:String,@SerialName("cycle_id") val cycleId:String,val amount:Double,
+    val category:String,val description:String,@SerialName("purchase_date") val purchaseDate:String,val payer:String,@SerialName("created_by") val createdBy:String
+) { fun toLocal()=CreditCardPurchase(id,spaceId,cycleId,amount,category,description,purchaseDate,payer,createdBy,true) }
+private fun CreditCardPurchase.toDto(space:String,user:String)=CreditCardPurchaseDto(id,space,cycleId,amount,category,description,purchaseDate,payer,user)

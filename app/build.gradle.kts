@@ -15,8 +15,8 @@ android {
         applicationId = "br.com.financasdocasal"
         minSdk = 26
         targetSdk = 35
-        versionCode = 8
-        versionName = "1.3.1"
+        versionCode = 9
+        versionName = "1.4.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "SUPABASE_URL", "\"https://lurnfuuorxewnmdimkcq.supabase.co\"")
         buildConfigField("String", "SUPABASE_PUBLISHABLE_KEY", "\"sb_publishable_CyHdycF-sdybRtsWniqb1g_1YRzJS5w\"")

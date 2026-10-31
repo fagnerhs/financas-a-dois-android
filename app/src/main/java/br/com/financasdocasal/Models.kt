@@ -44,6 +44,22 @@ data class SavingsGoal(
     val targetDate: String? = null, val createdBy: String? = null, val synced: Boolean = false
 )
 
+data class CreditCardCycle(
+    val id: String = UUID.randomUUID().toString(), val spaceId: String = "", val openedAt: String = "",
+    val closedAt: String? = null, val statementAmount: Double = 0.0, val closedBy: String? = null,
+    val paidAt: String? = null, val paidBy: String? = null, val synced: Boolean = false
+)
+
+data class CreditCardPurchase(
+    val id: String = UUID.randomUUID().toString(), val spaceId: String = "", val cycleId: String = "",
+    val amount: Double = 0.0, val category: String = "Outros", val description: String = "",
+    val purchaseDate: String = "", val payer: String = "Não informado", val createdBy: String? = null,
+    val synced: Boolean = false
+)
+
+internal fun nextCreditCardCycleId(spaceId: String, closedCycleId: String): String =
+    UUID.nameUUIDFromBytes("financas-a-dois:credit-card-next:$spaceId:$closedCycleId".toByteArray(Charsets.UTF_8)).toString()
+
 data class ExpenseEvent(
     val id: Long = 0, val expenseId: String = "", val spaceId: String = "", val actorId: String? = null,
     val eventType: String = "", val visibility: String = "shared", val snapshot: String = "{}", val occurredAt: String = ""
