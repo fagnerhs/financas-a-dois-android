@@ -41,7 +41,7 @@ object SupabaseCloud {
         return space.copy(members=client.from("couple_members").select { filter { eq("space_id",space.id) } }.decodeList())
     }
     suspend fun fetchExpenses(spaceId:String):List<ExpenseDto> = client.from("expenses").select { filter { eq("space_id",spaceId) } }.decodeList()
-    @OptIn(SupabaseExperimental::class) fun observeExpenses(spaceId:String):Flow<List<ExpenseDto>>=client.from("expenses").selectAsFlow(ExpenseDto::id) { eq("space_id",spaceId) }
+    @OptIn(SupabaseExperimental::class) fun observeExpenses(spaceId:String):Flow<List<ExpenseDto>> = client.from("expenses").selectAsFlow(ExpenseDto::id) { eq("space_id",spaceId) }
     suspend fun fetchExpenseBalances(spaceId:String):List<ExpenseBalanceDto> = client.from("expense_balances").select { filter { eq("space_id",spaceId) } }.decodeList()
     @OptIn(SupabaseExperimental::class) fun observeExpenseBalances(spaceId:String):Flow<List<ExpenseBalanceDto>> = client.from("expense_balances").selectAsFlow(ExpenseBalanceDto::expenseId) { eq("space_id",spaceId) }
     suspend fun upsertExpense(spaceId:String,userId:String,expense:Expense) { client.from("expenses").upsert(expense.toDto(spaceId,userId)) }
@@ -53,17 +53,17 @@ object SupabaseCloud {
     suspend fun deleteExpense(spaceId:String,remoteId:String) { client.from("expenses").delete { filter { eq("id",remoteId); eq("space_id",spaceId) } } }
     suspend fun markExpenseReviewed(spaceId:String,expenseId:String) { client.postgrest.rpc("mark_expense_reviewed",MarkExpenseReviewedArgs(expenseId,spaceId)).decodeAs<Boolean>() }
     suspend fun fetchRecurringBills(spaceId:String):List<RecurringBillDto> = client.from("recurring_bills").select { filter { eq("space_id",spaceId) } }.decodeList()
-    @OptIn(SupabaseExperimental::class) fun observeRecurringBills(spaceId:String):Flow<List<RecurringBillDto>>=client.from("recurring_bills").selectAsFlow(RecurringBillDto::id) { eq("space_id",spaceId) }
+    @OptIn(SupabaseExperimental::class) fun observeRecurringBills(spaceId:String):Flow<List<RecurringBillDto>> = client.from("recurring_bills").selectAsFlow(RecurringBillDto::id) { eq("space_id",spaceId) }
     suspend fun upsertRecurringBill(spaceId:String,userId:String,bill:RecurringBill) { client.from("recurring_bills").upsert(bill.toDto(spaceId,userId)) }
     suspend fun deleteRecurringBill(spaceId:String,id:String) { client.from("recurring_bills").delete { filter { eq("id",id); eq("space_id",spaceId) } } }
     suspend fun uploadPendingRecurringBills(spaceId:String,userId:String,store:LocalStore):Int { var n=0; store.pendingRecurringBills().filter { it.createdBy == userId }.forEach { upsertRecurringBill(spaceId,userId,it); store.markRecurringBillSynced(it.id); n++ }; return n }
     suspend fun fetchSavingsGoals(spaceId:String):List<SavingsGoalDto> = client.from("savings_goals").select { filter { eq("space_id",spaceId) } }.decodeList()
-    @OptIn(SupabaseExperimental::class) fun observeSavingsGoals(spaceId:String):Flow<List<SavingsGoalDto>>=client.from("savings_goals").selectAsFlow(SavingsGoalDto::id) { eq("space_id",spaceId) }
+    @OptIn(SupabaseExperimental::class) fun observeSavingsGoals(spaceId:String):Flow<List<SavingsGoalDto>> = client.from("savings_goals").selectAsFlow(SavingsGoalDto::id) { eq("space_id",spaceId) }
     suspend fun upsertSavingsGoal(spaceId:String,userId:String,goal:SavingsGoal) { client.postgrest.rpc("save_savings_goal",SaveSavingsGoalArgs(goal.id,spaceId,goal.name,goal.targetAmount,goal.savedAmount,goal.monthlyContribution,goal.targetDate)).decodeAs<String>() }
     suspend fun deleteSavingsGoal(spaceId:String,id:String) { client.from("savings_goals").delete { filter { eq("id",id); eq("space_id",spaceId) } } }
     suspend fun uploadPendingSavingsGoals(spaceId:String,userId:String,store:LocalStore):Int { var n=0; store.pendingSavingsGoals().filter { it.createdBy == userId }.forEach { upsertSavingsGoal(spaceId,userId,it); store.markSavingsGoalSynced(it.id); n++ }; return n }
     suspend fun fetchExpenseEvents(spaceId:String):List<ExpenseEventDto> = client.from("expense_events").select { filter { eq("space_id",spaceId) } }.decodeList()
-    @OptIn(SupabaseExperimental::class) fun observeExpenseEvents(spaceId:String):Flow<List<ExpenseEventDto>>=client.from("expense_events").selectAsFlow(ExpenseEventDto::id) { eq("space_id",spaceId) }
+    @OptIn(SupabaseExperimental::class) fun observeExpenseEvents(spaceId:String):Flow<List<ExpenseEventDto>> = client.from("expense_events").selectAsFlow(ExpenseEventDto::id) { eq("space_id",spaceId) }
     suspend fun fetchBudgets(spaceId:String):Map<String,Double> = client.from("category_budgets").select { filter { eq("space_id",spaceId) } }.decodeList<BudgetDto>().associate { it.category to it.monthlyLimit }
     suspend fun saveBudgets(spaceId:String,budgets:Map<String,Double>) {
         val existing=fetchBudgets(spaceId)

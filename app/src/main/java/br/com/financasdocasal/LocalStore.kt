@@ -22,7 +22,7 @@ class LocalStore(context: Context) : SQLiteOpenHelper(context, "financas.db", nu
         if (oldVersion < 2) {
             db.execSQL("ALTER TABLE expenses ADD COLUMN remote_id TEXT"); db.execSQL("ALTER TABLE expenses ADD COLUMN synced INTEGER NOT NULL DEFAULT 0")
             val ids = mutableListOf<Long>(); db.rawQuery("SELECT id FROM expenses WHERE remote_id IS NULL", null).use { c -> while(c.moveToNext()) ids += c.getLong(0) }
-            ids.forEach { db.execSQL("UPDATE expenses SET remote_id=? WHERE id=?", arrayOf(UUID.randomUUID().toString(), it)) }; db.execSQL("CREATE UNIQUE INDEX expenses_remote_id_idx ON expenses(remote_id)")
+            ids.forEach { db.execSQL("UPDATE expenses SET remote_id=? WHERE id=?", arrayOf<Any?>(UUID.randomUUID().toString(), it)) }; db.execSQL("CREATE UNIQUE INDEX expenses_remote_id_idx ON expenses(remote_id)")
         }
         if (oldVersion < 3) db.execSQL("ALTER TABLE expenses ADD COLUMN created_by TEXT")
         if (oldVersion < 4) {
@@ -180,7 +180,7 @@ class LocalStore(context: Context) : SQLiteOpenHelper(context, "financas.db", nu
             while (c.moveToNext()) rows += c.getLong(0) to LocalFieldCrypto.encrypt(c.getString(1))
         }
         rows.forEach { (id, encrypted) ->
-            db.execSQL("UPDATE expenses SET creator_share_amount=? WHERE id=?", arrayOf(encrypted, id))
+            db.execSQL("UPDATE expenses SET creator_share_amount=? WHERE id=?", arrayOf<Any?>(encrypted, id))
         }
     }
     private fun deleteMissingSynced(table: String, idColumn: String, ids: Set<String>) {
