@@ -15,9 +15,9 @@ Se o cadastro mostrar um limite temporário de envio de e-mail, aguarde o limite
 
 ## Atualizar uma instalação anterior
 
-O workflow atual assina cada APK com uma chave criada somente para aquela execução. Por isso, o Android não permite instalar este APK por cima de um APK assinado por outra execução. Antes de remover a versão anterior, conecte os aparelhos à internet e confirme que os dados sincronizaram. Em **Ajustes → Backup e transferência**, exporte um backup cifrado e guarde a senha (mínimo de 12 caracteres) e o arquivo em local seguro. Em seguida, desinstale a versão anterior, instale o APK novo e entre na mesma conta. Os dados já sincronizados continuam na nuvem; o backup protege lançamentos que ainda não foram sincronizados e dados locais.
+**Importante para esta migração:** as versões até 1.3.1 foram assinadas com chaves temporárias. Para instalar a 1.4.0 pela primeira vez, conecte os aparelhos à internet e confirme que os dados terminaram de sincronizar. Se houver lançamentos somente locais, use **Ajustes → Backup e transferência** para exportar um backup cifrado; guarde o arquivo e a senha (mínimo de 12 caracteres) em local seguro. Depois desinstale a versão anterior, instale a 1.4.0 e entre na mesma conta. A desinstalação apaga os dados locais ainda não sincronizados; os dados já enviados à nuvem continuam disponíveis.
 
-A assinatura temporária também significa que futuras versões precisarão ser instaladas novamente, em vez de atualizadas por cima. O APK é assinado e instalável, mas não é publicado na Play Store.
+Da versão 1.4.0 em diante, o workflow usa uma chave de release permanente armazenada nos segredos criptografados do GitHub Actions. Preserve esses segredos e o acesso ao repositório: as próximas versões assinadas com essa chave poderão ser instaladas como atualização normal. O APK não é publicado na Play Store.
 
 ## Recursos e privacidade
 

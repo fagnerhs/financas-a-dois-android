@@ -28,14 +28,25 @@ jobs:
           chmod +x gradlew
           ./gradlew test assembleRelease --no-daemon
       - name: Assinar e verificar APK para instalação
+        env:
+          ANDROID_RELEASE_KEYSTORE_BASE64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}
+          ANDROID_RELEASE_PASSWORD: ${{ secrets.ANDROID_RELEASE_PASSWORD }}
+          ANDROID_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
         run: |
-          STORE_PASS=$(openssl rand -hex 32)
-          keytool -genkeypair -storetype JKS -keystore "$RUNNER_TEMP/release.jks" -storepass "$STORE_PASS" -keypass "$STORE_PASS" -alias release -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Financas a Dois, OU=Android, O=Financas a Dois, L=NA, S=NA, C=BR"
+          set -euo pipefail
+          test -n "$ANDROID_RELEASE_KEYSTORE_BASE64"
+          test -n "$ANDROID_RELEASE_PASSWORD"
+          test -n "$ANDROID_RELEASE_KEY_ALIAS"
+          KEYSTORE_PATH="$RUNNER_TEMP/release.p12"
+          trap 'rm -f "$KEYSTORE_PATH"' EXIT
+          printf '%s' "$ANDROID_RELEASE_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE_PATH"
+          chmod 600 "$KEYSTORE_PATH"
           $ANDROID_HOME/build-tools/36.0.0/apksigner sign \
-            --ks "$RUNNER_TEMP/release.jks" \
-            --ks-key-alias release \
-            --ks-pass pass:"$STORE_PASS" \
-            --key-pass pass:"$STORE_PASS" \
+            --ks "$KEYSTORE_PATH" \
+            --ks-type PKCS12 \
+            --ks-key-alias "$ANDROID_RELEASE_KEY_ALIAS" \
+            --ks-pass env:ANDROID_RELEASE_PASSWORD \
+            --key-pass env:ANDROID_RELEASE_PASSWORD \
             --out app/build/outputs/apk/release/app-release-signed.apk \
             app/build/outputs/apk/release/app-release-unsigned.apk
           $ANDROID_HOME/build-tools/36.0.0/apksigner verify --verbose app/build/outputs/apk/release/app-release-signed.apk
